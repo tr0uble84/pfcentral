@@ -1,0 +1,1442 @@
+<x-app-layout>
+    <x-slot name="header">
+        <div>
+            <h2 class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight">
+                {{ __('Firewalls') }}
+            </h2>
+            <div class="mt-1 flex flex-col sm:flex-row sm:items-center">
+                <div class="text-sm text-gray-500 dark:text-gray-400 flex items-center">
+                    <a href="{{ route('dashboard') }}"
+                        class="font-medium text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors duration-200">
+                        {{ __('Dashboard') }}
+                    </a>
+                    <span class="mx-2 text-gray-300 dark:text-gray-600">/</span>
+                    <span class="font-medium">
+                        {{ __('Firewalls') }}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </x-slot>
+
+    <div class="py-12">
+        <div class="max-w-full mx-auto sm:px-6 lg:px-8">
+            @if(session('success'))
+                <div class="bg-green-500 text-white p-4 rounded-lg mb-4">
+                    {{ session('success') }}
+                </div>
+            @endif
+
+            @if(session('bulk_results'))
+                <div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-4" role="alert">
+                    <p class="font-bold">Bulk Action Results:</p>
+                    <ul class="list-disc pl-5">
+                        @foreach(session('bulk_results') as $result)
+                            <li>{{ $result }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
+
+            <!-- Top Section: Map & Stats -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+
+                {{-- Map Section (2/3 width) --}}
+                <div class="lg:col-span-2 bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg h-full"
+                    x-data="firewallMap()" x-init="initMap()">
+                    <div class="p-2 text-sm text-gray-600 bg-gray-100 dark:bg-gray-700 dark:text-gray-300"
+                        x-show="status" x-text="status"></div>
+                    <div id="firewall-map" style="height: 100%; min-height: 480px; width: 100%; z-index: 0;"></div>
+                </div>
+
+                {{-- Stats Widgets (1/3 width, stacked) --}}
+                <div x-data="firewallStats({{ $firewalls->pluck('id') }})" class="flex flex-col gap-4">
+                    <!-- Total Firewalls -->
+                    <div
+                        class="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg p-6 flex items-center flex-1">
+                        <div
+                            class="p-3 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-500 dark:text-blue-300 mr-4">
+                            <svg class="h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Total Firewalls</p>
+                            <div class="flex items-center">
+                                <p class="text-4xl font-bold text-gray-900 dark:text-gray-100" x-text="totalCount">
+                                    {{ $totalFirewalls }}
+                                </p>
+                                <template x-if="offlineCount === 0">
+                                    <span
+                                        class="ml-3 flex items-center text-xs font-medium px-2 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                        All Online
+                                    </span>
+                                </template>
+                                <template x-if="offlineCount > 0">
+                                    <span
+                                        class="ml-3 flex items-center text-xs font-medium px-2 py-1 rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                                        <span x-text="offlineCount"></span> <span class="ml-1">Offline</span>
+                                    </span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- System Updates -->
+                    <div
+                        class="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg p-6 flex items-center flex-1">
+                        <div
+                            class="p-3 rounded-full bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-300 mr-4">
+                            <svg class="h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-gray-500 dark:text-gray-400">System Updates Pending</p>
+                            <template x-if="!hasData">
+                                <div class="h-8 w-12 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mt-1"></div>
+                            </template>
+                            <template x-if="hasData">
+                                <div class="flex items-center text-4xl font-bold text-gray-900 dark:text-gray-100">
+                                    <span x-text="sysCount"></span>
+                                    <span
+                                        class="ml-3 flex items-center text-xs font-medium px-2 py-1 rounded-full align-middle text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900">
+                                        <span x-text="apiCount"></span> <span class="ml-1">API Updates</span>
+                                    </span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+
+
+                    <!-- Missing Address -->
+                    <div
+                        class="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg p-6 flex items-center flex-1">
+                        <div
+                            class="p-3 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 mr-4">
+                            <svg class="h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                                stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z">
+                                </path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Missing Addresses</p>
+                            <p class="text-4xl font-bold text-gray-900 dark:text-gray-100">
+                                {{ $missingAddresses }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                function firewallMap() {
+                    return {
+                        map: null,
+                        markers: [],
+                        heatLayer: null,
+                        status: '',
+                        locale: '{{ app()->getLocale() }}',
+                        items: [],
+
+                        initMap() {
+                            this.items = {!! json_encode($firewalls->map(fn($f) => [
+    'name' => $f->name,
+    'address' => $f->address ?? '',
+    'latitude' => $f->latitude,
+    'longitude' => $f->longitude
+]), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) !!};
+
+                            const mapEl = document.getElementById('firewall-map');
+                            if (mapEl) mapEl.style.height = '100%';
+
+                            this.loadResources().then(() => {
+                                this.renderMap();
+                            });
+                        },
+
+                        loadResources() {
+                            return new Promise((resolve) => {
+                                let resourcesLoaded = 0;
+                                const totalResources = 3;
+
+                                const checkDone = () => {
+                                    resourcesLoaded++;
+                                    if (resourcesLoaded === totalResources) resolve();
+                                };
+
+                                if (!document.getElementById('leaflet-css')) {
+                                    const link = document.createElement('link');
+                                    link.id = 'leaflet-css';
+                                    link.rel = 'stylesheet';
+                                    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+                                    link.onload = checkDone;
+                                    document.head.appendChild(link);
+                                } else {
+                                    checkDone();
+                                }
+
+                                if (!window.L) {
+                                    const script = document.createElement('script');
+                                    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+                                    script.onload = () => {
+                                        const heatScript = document.createElement('script');
+                                        heatScript.src = 'https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js';
+                                        heatScript.onload = checkDone;
+                                        document.head.appendChild(heatScript);
+                                        checkDone();
+                                    };
+                                    document.head.appendChild(script);
+                                } else {
+                                    checkDone();
+                                    if (!L.heatLayer) {
+                                        const heatScript = document.createElement('script');
+                                        heatScript.src = 'https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js';
+                                        heatScript.onload = checkDone;
+                                        document.head.appendChild(heatScript);
+                                    } else {
+                                        checkDone();
+                                    }
+                                }
+                            });
+                        },
+
+                        renderMap() {
+                            if (!this.map) {
+                                this.map = L.map('firewall-map', { scrollWheelZoom: false }).setView([20, 0], 2);
+                                L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=' + this.locale, {
+                                    attribution: '&copy; Google Maps',
+                                    maxZoom: 20
+                                }).addTo(this.map);
+                            } else {
+                                this.map.invalidateSize();
+                            }
+
+                            this.markers.forEach(m => this.map.removeLayer(m));
+                            this.markers = [];
+                            if (this.heatLayer) this.map.removeLayer(this.heatLayer);
+
+                            const bounds = [];
+                            const heatPoints = [];
+                            const geocodeQueue = [];
+
+                            this.items.forEach(c => {
+                                const lat = parseFloat(c.latitude);
+                                const lng = parseFloat(c.longitude);
+                                if (!isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0)) {
+                                    this.addMarker(lat, lng, c.name, c.address);
+                                    bounds.push([lat, lng]);
+                                    heatPoints.push([lat, lng, 1.2]); // Balanced Intensity
+                                } else if (c.address) {
+                                    geocodeQueue.push(c);
+                                }
+                            });
+
+                            if (heatPoints.length > 0 && L.heatLayer) {
+                                this.heatLayer = L.heatLayer(heatPoints, {
+                                    radius: 35,
+                                    blur: 35,
+                                    maxZoom: 12,
+                                    minOpacity: 0.3,
+                                    gradient: { 0.3: 'indigo', 0.5: 'purple', 0.7: 'orange', 1: 'red' }
+                                }).addTo(this.map);
+                            }
+
+                            if (bounds.length > 0) {
+                                this.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+                            }
+
+                            if (geocodeQueue.length > 0) {
+                                this.processGeocodeQueue(geocodeQueue, bounds, heatPoints);
+                            }
+                        },
+
+                        addMarker(lat, lng, name, address) {
+                            const container = document.createElement('div');
+                            const boldTitle = document.createElement('b');
+                            boldTitle.textContent = name || '';
+                            container.appendChild(boldTitle);
+                            if (address) {
+                                container.appendChild(document.createElement('br'));
+                                const addrSpan = document.createElement('span');
+                                addrSpan.textContent = address;
+                                container.appendChild(addrSpan);
+                            }
+
+                            const marker = L.circleMarker([lat, lng], {
+                                radius: 5,
+                                fillColor: '#6366f1',
+                                color: '#ffffff',
+                                weight: 1,
+                                opacity: 1,
+                                fillOpacity: 0.9
+                            })
+                                .addTo(this.map)
+                                .bindPopup(container);
+                            this.markers.push(marker);
+                        },
+
+                        async processGeocodeQueue(queue, bounds, heatPoints) {
+                            if (queue.length === 0) return;
+                            this.status = `Geocoding ${queue.length} addresses...`;
+
+                            for (let i = 0; i < queue.length; i++) {
+                                const item = queue[i];
+                                this.status = `Geocoding ${i + 1}/${queue.length}: ${item.name}`;
+
+                                try {
+                                    const url = `{{ route('users.geocode') }}?address=${encodeURIComponent(item.address)}`;
+                                    const response = await fetch(url);
+                                    if (response.ok) {
+                                        const data = await response.json();
+                                        if (data && data.length > 0) {
+                                            const lat = parseFloat(data[0].lat);
+                                            const lon = parseFloat(data[0].lon);
+
+                                            this.addMarker(lat, lon, item.name, item.address);
+                                            bounds.push([lat, lon]);
+                                            heatPoints.push([lat, lon, 1.2]);
+
+                                            if (bounds.length > 0) this.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+
+                                            if (this.heatLayer) this.map.removeLayer(this.heatLayer);
+                                            if (L.heatLayer) {
+                                                this.heatLayer = L.heatLayer(heatPoints, {
+                                                    radius: 35,
+                                                    blur: 35,
+                                                    maxZoom: 12,
+                                                    minOpacity: 0.3,
+                                                    gradient: { 0.3: 'indigo', 0.5: 'purple', 0.7: 'orange', 1: 'red' }
+                                                }).addTo(this.map);
+                                            }
+                                        }
+                                    }
+                                } catch (error) { console.error(error); }
+                                await new Promise(r => setTimeout(r, 1000));
+                            }
+                            this.status = '';
+                        }
+                    };
+                }
+            </script>
+
+            @php
+                $uniqueCustomers = $firewalls->pluck('company.name')->unique()->sort()->values();
+
+                // Pre-load all firewall status caches in one batch so the firewalls array
+                // renders with last-known values instead of '-' placeholders.
+                // Prevents sysVersion/apiVersion/status flash on page load.
+                $firewallCaches = [];
+                foreach ($firewalls as $fw) {
+                    $cached = \Illuminate\Support\Facades\Cache::get('firewall_status_' . $fw->id);
+                    if ($cached) {
+                        // refreshSystemStatus() flattens everything into cache['data'] directly.
+                        // product_version, api_version, gateways etc. are all at cache['data'][key].
+                        $flat = is_array($cached['data'] ?? null) ? $cached['data'] : [];
+                        $onlineRaw = array_key_exists('online', $cached) ? $cached['online'] : null;
+                        $firewallCaches[$fw->id] = [
+                            // Preserve null (unknown) but cast 1/0 to true/false.
+                            // Redis stores PHP booleans as integers; strict === comparisons break without this.
+                            'online'               => $onlineRaw !== null ? (bool) $onlineRaw : null,
+                            'api_version'          => $cached['api_version'] ?? $flat['api_version'] ?? null,
+                            'product_version'      => $flat['product_version']   ?? $flat['version'] ?? null,
+                            'update_available'     => (bool) ($flat['update_available']     ?? false),
+                            'api_update_available' => (bool) ($flat['api_update_available'] ?? false),
+                        ];
+                    } else {
+                        $firewallCaches[$fw->id] = null;
+                    }
+                }
+
+                // Pre-load backup metadata for the Backup column (GlobalAdmin only).
+                $firewallBackups = [];
+                if (auth()->user()->isGlobalAdmin()) {
+                    foreach ($firewalls as $fw) {
+                        $bk = $fw->configBackup;
+                        $firewallBackups[$fw->id] = ($bk && $bk->status === 'success') ? [
+                            'url'       => route('firewall.backup.download', $fw),
+                            'pulled_at' => $bk->pulled_at?->utc()->toIso8601String(),
+                            'size_kb'   => $bk->size_bytes ? number_format($bk->size_bytes / 1024, 2) : null,
+                        ] : null;
+                    }
+                }
+            @endphp
+            <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg" x-data="{
+                ...window.columnSelectorMixin('firewalls_cols_v1', [
+                    @if(auth()->user()->isGlobalAdmin())
+                    { key: 'company', label: 'Company', default: true },
+                    @endif
+                    { key: 'host',    label: 'Host',    default: true },
+                    { key: 'address', label: 'Address', default: true },
+                    { key: 'system',  label: 'System',  default: true },
+                    { key: 'api',     label: 'API',     default: true },
+                    @if(auth()->user()->isGlobalAdmin())
+                    { key: 'backup',  label: 'Backup',  default: true },
+                    @endif
+                ]),
+
+                search: '',
+                statusFilter: 'all',
+                customerFilter: 'all',
+                systemFilter: 'all',
+                apiFilter: 'all',
+                backupFilter: 'all',
+                filtersOpen: false,
+                sortBy: 'name',
+                sortAsc: true,
+                firewalls: [],
+                customers: {{ json_encode($uniqueCustomers) }},
+                deleteModalOpen: false,
+                deleteAction: '',
+                firewallName: '',
+                confirmEmail: '',
+
+                get activeFilterCount() {
+                    let n = 0;
+                    if (this.statusFilter !== 'all')   n++;
+                    if (this.customerFilter !== 'all') n++;
+                    if (this.systemFilter !== 'all')   n++;
+                    if (this.apiFilter !== 'all')      n++;
+                    if (this.backupFilter !== 'all')   n++;
+                    return n;
+                },
+
+                clearFilters() {
+                    this.statusFilter   = 'all';
+                    this.customerFilter = 'all';
+                    this.systemFilter   = 'all';
+                    this.apiFilter      = 'all';
+                    this.backupFilter   = 'all';
+                },
+
+                _updateUrl(key, value) {
+                    const url = new URL(window.location);
+                    if (value && value !== 'all') { url.searchParams.set(key, value); }
+                    else { url.searchParams.delete(key); }
+                    window.history.replaceState(null, '', url);
+                },
+
+                init() {
+                    this.initColumns();
+
+                    // Initialise from URL params (supports deep-linking e.g. ?customer=Acme)
+                    const p = new URLSearchParams(window.location.search);
+                    this.search         = p.get('search')   || '';
+                    this.customerFilter = p.get('customer') || 'all';
+                    this.statusFilter   = p.get('status')   || 'all';
+                    this.systemFilter   = p.get('system')   || 'all';
+                    this.apiFilter      = p.get('api')      || 'all';
+                    this.backupFilter   = p.get('backup')   || 'all';
+
+                    // Open filter panel if any non-default filter is active
+                    if (this.activeFilterCount > 0) this.filtersOpen = true;
+
+                    // Persist filter state to URL on change
+                    this.$watch('search',         v => this._updateUrl('search',   v));
+                    this.$watch('customerFilter', v => this._updateUrl('customer', v));
+                    this.$watch('statusFilter',   v => this._updateUrl('status',   v));
+                    this.$watch('systemFilter',   v => this._updateUrl('system',   v));
+                    this.$watch('apiFilter',      v => this._updateUrl('api',      v));
+                    this.$watch('backupFilter',   v => this._updateUrl('backup',   v));
+
+                    this.firewalls = {{ json_encode($firewalls->map(fn($f) => [
+    'id'                 => $f->id,
+    'name'               => $f->name,
+    'os_type'            => $f->os_type ?? 'pfsense',
+    'os_display_name'    => $f->os_display_name,
+    'status'             => ($firewallCaches[$f->id]['online'] ?? $f->is_online) === true ? 'online'
+                            : (($firewallCaches[$f->id]['online'] ?? $f->is_online) === false ? 'offline' : 'unknown'),
+    'isOnline'           => $firewallCaches[$f->id]['online'] ?? $f->is_online,
+    'url'                => $f->url,
+    'displayUrl'         => preg_replace('#^https?://#', '', $f->url),
+    'linkUrl'            => \Illuminate\Support\Str::startsWith($f->url, ['http://', 'https://']) ? $f->url : 'https://' . $f->url,
+    'address'            => $f->address,
+    'sysVersion'         => $firewallCaches[$f->id]['product_version']      ?? '-',
+    'sysUpdateAvailable' => $firewallCaches[$f->id]['update_available']      ?? false,
+    'apiVersion'         => $firewallCaches[$f->id]['api_version']           ?? '-',
+    'apiUpdateAvailable' => $firewallCaches[$f->id]['api_update_available']  ?? false,
+    'company_name'       => $f->company->name,
+    'company_url'        => route('companies.show', $f->company),
+    'dashboard_url'      => route('firewall.dashboard', $f),
+    'edit_url'           => route('firewalls.edit', $f),
+    'delete_url'         => route('firewalls.destroy', $f),
+    'check_status_url'   => route('firewall.check-status', $f),
+    'backup_url'         => auth()->user()->isGlobalAdmin() ? ($firewallBackups[$f->id]['url']       ?? null) : null,
+    'backup_pulled_at'   => auth()->user()->isGlobalAdmin() ? ($firewallBackups[$f->id]['pulled_at']  ?? null) : null,
+    'backup_size_kb'     => auth()->user()->isGlobalAdmin() ? ($firewallBackups[$f->id]['size_kb']    ?? null) : null,
+    'searchData'         => strtolower($f->name . ' ' . $f->company->name . ' ' . $f->url . ' ' . $f->hostname)
+])) }};
+
+                    // Listen for updates dispatched by the per-firewall WS listener below
+                    window.addEventListener('firewall-updated', (e) => {
+                        const idx = this.firewalls.findIndex(f => f.id === e.detail.id);
+                        if (idx !== -1) {
+                            const f = this.firewalls[idx];
+                            f.isOnline           = e.detail.online;
+                            f.sysUpdateAvailable = e.detail.sys;
+                            f.apiUpdateAvailable = e.detail.api;
+                            // e.detail.data is serviceResult (r.data) which may wrap actual fields under .data
+                            const s = e.detail.data || {};
+                            const sysData = (s.data && typeof s.data === 'object') ? s.data : s;
+                            f.sysVersion = sysData.product_version || sysData.version || '-';
+                            f.apiVersion = e.detail.apiVersion || '-';
+                        }
+                    });
+
+                    // If we have unknown statuses (Cache Disabled), trigger a background refresh
+                    if (this.firewalls.some(f => f.isOnline === null)) {
+                        fetch('{{ route("firewalls.refresh-all") }}', {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                                'Accept': 'application/json'
+                            },
+                            body: JSON.stringify({ sync: false }) // Async Mode
+                        }).then(r => r.json()).then(data => {
+                            console.log('Background Refresh Triggered', data);
+                        }).catch(e => console.error(e));
+                    }
+                },
+                
+                get filteredRows() {
+                    let result = this.firewalls.filter(f => {
+                        const matchesSearch   = this.search === '' || f.searchData.includes(this.search.toLowerCase());
+                        const matchesStatus   = this.statusFilter === 'all'
+                            || (this.statusFilter === 'online'  && f.isOnline === true)
+                            || (this.statusFilter === 'offline' && f.isOnline === false);
+                        const matchesCustomer = this.customerFilter === 'all' || f.company_name === this.customerFilter;
+                        const matchesSystem   = this.systemFilter === 'all'
+                            || (this.systemFilter === 'update' && f.sysUpdateAvailable);
+                        const matchesApi      = this.apiFilter === 'all'
+                            || (this.apiFilter === 'update' && f.apiUpdateAvailable);
+                        const matchesBackup   = this.backupFilter === 'all'
+                            || (this.backupFilter === 'has'  &&  f.backup_url)
+                            || (this.backupFilter === 'none' && !f.backup_url);
+
+                        return matchesSearch && matchesStatus && matchesCustomer && matchesSystem && matchesApi && matchesBackup;
+                    });
+
+                    return result.sort((a, b) => {
+                        let valA = a[this.sortBy];
+                        let valB = b[this.sortBy];
+
+                        if (this.sortBy === 'company') { valA = a.company_name; valB = b.company_name; }
+                        if (this.sortBy === 'address') { valA = !!valA; valB = !!valB; }
+                        if (typeof valA === 'string') valA = valA.toLowerCase();
+                        if (typeof valB === 'string') valB = valB.toLowerCase();
+
+                        if (valA < valB) return this.sortAsc ? -1 : 1;
+                        if (valA > valB) return this.sortAsc ?  1 : -1;
+                        return 0;
+                    });
+                },
+                
+                 openDeleteModal(action, name) {
+                    this.deleteAction = action;
+                    this.firewallName = name;
+                    this.confirmEmail = '';
+                    $dispatch('open-modal', 'delete-firewall-modal');
+                }
+            }">
+                <div class="p-6 text-gray-900 dark:text-gray-100">
+                    <div class="flex flex-col space-y-4 mb-6">
+                        <!-- Title + Add Button -->
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100">
+                                {{ __('Managed Firewalls') }}
+                            </h3>
+                            @if(!auth()->user()->isReadOnly())
+                            <a href="{{ route('firewalls.create') }}"
+                                class="inline-flex items-center px-4 py-2 bg-indigo-600 border border-transparent rounded-md font-medium text-sm text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition ease-in-out duration-150">
+                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                </svg>
+                                {{ __('Add Firewall') }}
+                            </a>
+                            @endif
+                        </div>
+
+                        <!-- ── Primary Toolbar ─────────────────────────────────── -->
+                        <div class="flex flex-wrap gap-2 items-center bg-gray-50 dark:bg-gray-700/50 p-3 rounded-xl">
+
+                            <!-- Search -->
+                            <div class="relative flex-1 min-w-[180px]">
+                                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                                    </svg>
+                                </div>
+                                <input type="text" x-model="search" placeholder="Search firewalls…"
+                                    class="pl-9 pr-8 w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-indigo-500 focus:border-indigo-500 text-sm">
+                                <button x-show="search.length > 0" @click="search = ''" style="display:none;"
+                                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <!-- Divider -->
+                            <div class="hidden sm:block h-6 w-px bg-gray-300 dark:bg-gray-600"></div>
+
+                            <!-- Filters Toggle -->
+                            <div class="relative">
+                                <button type="button" @click="filtersOpen = !filtersOpen"
+                                    :class="filtersOpen || activeFilterCount > 0 ? 'ring-2 ring-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 border-indigo-300 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300' : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'"
+                                    class="relative inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border transition-colors focus:outline-none">
+                                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/>
+                                    </svg>
+                                    <span class="hidden sm:inline">Filters</span>
+                                    <span x-show="activeFilterCount > 0" x-text="activeFilterCount" style="display:none;"
+                                        class="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-indigo-600 text-white rounded-full leading-none"></span>
+                                </button>
+                            </div>
+
+                            <!-- Column Selector -->
+                            <x-column-selector :columns="array_filter([
+                                auth()->user()->isGlobalAdmin() ? ['key' => 'company', 'label' => 'Company'] : null,
+                                ['key' => 'host',    'label' => 'Host'],
+                                ['key' => 'address', 'label' => 'Address'],
+                                ['key' => 'system',  'label' => 'System'],
+                                ['key' => 'api',     'label' => 'API'],
+                                auth()->user()->isGlobalAdmin() ? ['key' => 'backup', 'label' => 'Backup'] : null,
+                            ])" />
+
+                            <!-- Result count -->
+                            <span class="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap ml-1 hidden lg:inline"
+                                x-text="filteredRows.length + ' of ' + firewalls.length + ' firewalls'"></span>
+
+                            <!-- Spacer -->
+                            <div class="flex-1"></div>
+
+                            <!-- Bulk Actions (non-readonly) -->
+                            @if(!auth()->user()->isReadOnly())
+                            <div class="flex items-center gap-2 border-l border-gray-200 dark:border-gray-600 pl-3">
+                                <span class="text-xs text-gray-500 whitespace-nowrap hidden xl:inline">With selected:</span>
+                                <select id="bulkActionSelect" name="action" form="bulkForm"
+                                    class="rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 text-sm w-40">
+                                    <option value="">Bulk Actions…</option>
+                                    <optgroup label="System">
+                                        <option value="reboot">Reboot</option>
+                                        <option value="update">System Update</option>
+                                        <option value="update_rest_api">Update REST API</option>
+                                        <option value="create_package">Install Package</option>
+                                    </optgroup>
+                                    @if(\App\Services\Deploy\DeployAccess::allows(auth()->user()))
+                                    <optgroup label="Deploy (checked first, with undo)">
+                                        <option value="deploy">Deploy changes…</option>
+                                        <option value="deploy_rule">Firewall rule</option>
+                                        <option value="deploy_alias">Alias</option>
+                                        <option value="deploy_nat">Port forward</option>
+                                        <option value="deploy_outbound">Outbound NAT rule</option>
+                                        <option value="deploy_host_override">DNS host override</option>
+                                        <option value="deploy_pfb_ipv4">pfBlockerNG IP list</option>
+                                    </optgroup>
+                                    @endif
+                                    <optgroup label="Configuration (Add to All)">
+                                        <option value="create_nat">Add NAT 1:1 / Port Forward</option>
+                                        <option value="create_ipsec">Add IPSec Tunnel</option>
+                                    </optgroup>
+                                </select>
+                                <x-secondary-button type="button" onclick="submitBulkAction()" class="rounded-lg text-sm py-2">
+                                    Apply
+                                </x-secondary-button>
+                            </div>
+                            @endif
+                        </div>
+
+                        <!-- ── Expandable Filters Panel ────────────────────────── -->
+                        <div x-show="filtersOpen"
+                            x-transition:enter="transition ease-out duration-150"
+                            x-transition:enter-start="opacity-0 -translate-y-1"
+                            x-transition:enter-end="opacity-100 translate-y-0"
+                            x-transition:leave="transition ease-in duration-100"
+                            x-transition:leave-start="opacity-100 translate-y-0"
+                            x-transition:leave-end="opacity-0 -translate-y-1"
+                            class="flex flex-wrap gap-3 items-end bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-3"
+                            style="display:none;">
+
+                            <!-- Status -->
+                            <div class="flex flex-col gap-1 min-w-[130px]">
+                                <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</label>
+                                <select x-model="statusFilter"
+                                    class="rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    <option value="all">All Status</option>
+                                    <option value="online">Online</option>
+                                    <option value="offline">Offline</option>
+                                </select>
+                            </div>
+
+                            @if(auth()->user()->isGlobalAdmin())
+                            <!-- Customer (GlobalAdmin only) -->
+                            <div class="flex flex-col gap-1 min-w-[160px]" x-data="{ custOpen: false, custSearch: '' }" @click.outside="custOpen = false">
+                                <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Company</label>
+                                <div class="relative">
+                                    <button @click="custOpen = !custOpen" type="button"
+                                        :class="customerFilter !== 'all' ? 'border-indigo-400 ring-1 ring-indigo-400' : 'border-gray-300 dark:border-gray-600'"
+                                        class="flex items-center justify-between w-full rounded-lg bg-white dark:bg-gray-700 dark:text-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 border">
+                                        <span x-text="customerFilter === 'all' ? 'All Companies' : customerFilter" class="truncate block text-left"></span>
+                                        <svg class="h-4 w-4 ml-2 text-gray-400 transition-transform" :class="{'rotate-180': custOpen}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path d="M19 9l-7 7-7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                    <div x-show="custOpen" x-transition class="absolute z-20 mt-1 w-full min-w-[200px] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-xl max-h-56 overflow-y-auto" style="display:none;">
+                                        <div class="p-2 border-b dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+                                            <input x-model="custSearch" type="text" placeholder="Search…" class="w-full text-xs rounded border-gray-300 dark:bg-gray-700 dark:border-gray-600">
+                                        </div>
+                                        <div @click="customerFilter = 'all'; custOpen = false" class="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm">All Companies</div>
+                                        <template x-for="c in customers.filter(x => x.toLowerCase().includes(custSearch.toLowerCase()))" :key="c">
+                                            <div @click="customerFilter = c; custOpen = false" class="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm truncate" x-text="c"></div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                            @endif
+
+                            <!-- System -->
+                            <div class="flex flex-col gap-1 min-w-[140px]">
+                                <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">System</label>
+                                <select x-model="systemFilter"
+                                    class="rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    <option value="all">All System</option>
+                                    <option value="update">Update Available</option>
+                                </select>
+                            </div>
+
+                            <!-- API -->
+                            <div class="flex flex-col gap-1 min-w-[130px]">
+                                <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">API</label>
+                                <select x-model="apiFilter"
+                                    class="rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    <option value="all">All API</option>
+                                    <option value="update">Update Available</option>
+                                </select>
+                            </div>
+
+                            @if(auth()->user()->isGlobalAdmin())
+                            <!-- Backup (GlobalAdmin only) -->
+                            <div class="flex flex-col gap-1 min-w-[140px]">
+                                <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Backup</label>
+                                <select x-model="backupFilter"
+                                    class="rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                    <option value="all">All Backups</option>
+                                    <option value="has">Has Backup</option>
+                                    <option value="none">No Backup</option>
+                                </select>
+                            </div>
+                            @endif
+
+                            <!-- Clear all -->
+                            <div class="flex flex-col justify-end pb-0.5">
+                                <button type="button" @click="clearFilters()" x-show="activeFilterCount > 0" style="display:none;"
+                                    class="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                    Clear all
+                                </button>
+                            </div>
+                        </div>
+
+                        <form id="bulkForm" action="{{ route('firewalls.bulk.action') }}" method="POST">
+                            @csrf
+                        </form>
+
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                <thead class="bg-gray-50 dark:bg-gray-700">
+                                    <tr>
+                                        @if(!auth()->user()->isReadOnly())
+                                        <th class="px-6 py-3 text-left">
+                                            <input type="checkbox" id="selectAll" onclick="toggleSelectAll()">
+                                        </th>
+                                        @endif
+                                        @if(auth()->user()->isGlobalAdmin())
+                                            <th scope="col"
+                                                x-show="cols.company"
+                                                class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none group"
+                                                @click="sortBy = 'company'; sortAsc = !sortAsc">
+                                                <div class="flex items-center gap-1">
+                                                    Company
+                                                    <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 transition-colors"
+                                                        :class="{ 'text-indigo-600 dark:text-indigo-400': sortBy === 'company', 'rotate-180': sortBy === 'company' && !sortAsc }"
+                                                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                    </svg>
+                                                </div>
+                                            </th>
+                                        @endif
+                                        <th scope="col"
+                                            class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none group"
+                                            @click="sortBy = 'name'; sortAsc = !sortAsc">
+                                            <div class="flex items-center gap-1">
+                                                Name
+                                                <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 transition-colors"
+                                                    :class="{ 'text-indigo-600 dark:text-indigo-400': sortBy === 'name', 'rotate-180': sortBy === 'name' && !sortAsc }"
+                                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                </svg>
+                                            </div>
+                                        </th>
+                                        <th scope="col"
+                                            class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                            Status
+                                        </th>
+                                        <th scope="col"
+                                            x-show="cols.host"
+                                            class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none group"
+                                            @click="sortBy = 'displayUrl'; sortAsc = !sortAsc">
+                                            <div class="flex items-center gap-1">
+                                                Host
+                                                <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 transition-colors"
+                                                    :class="{ 'text-indigo-600 dark:text-indigo-400': sortBy === 'displayUrl', 'rotate-180': sortBy === 'displayUrl' && !sortAsc }"
+                                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                </svg>
+                                            </div>
+                                        </th>
+                                        <th scope="col"
+                                            x-show="cols.address"
+                                            class="px-6 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none group"
+                                            @click="sortBy = 'address'; sortAsc = !sortAsc">
+                                            <div class="flex items-center justify-center gap-1">
+                                                Address
+                                                <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 transition-colors"
+                                                    :class="{ 'text-indigo-600 dark:text-indigo-400': sortBy === 'address', 'rotate-180': sortBy === 'address' && !sortAsc }"
+                                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                </svg>
+                                            </div>
+                                        </th>
+                                        <th scope="col"
+                                            x-show="cols.system"
+                                            class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none group"
+                                            @click="sortBy = 'sysUpdateAvailable'; sortAsc = !sortAsc">
+                                            <div class="flex items-center gap-1">
+                                                System
+                                                <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 transition-colors"
+                                                    :class="{ 'text-indigo-600 dark:text-indigo-400': sortBy === 'sysUpdateAvailable', 'rotate-180': sortBy === 'sysUpdateAvailable' && !sortAsc }"
+                                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                </svg>
+                                            </div>
+                                        </th>
+                                        <th scope="col"
+                                            x-show="cols.api"
+                                            class="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer select-none group"
+                                            @click="sortBy = 'apiUpdateAvailable'; sortAsc = !sortAsc">
+                                            <div class="flex items-center gap-1">
+                                                API
+                                                <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 transition-colors"
+                                                    :class="{ 'text-indigo-600 dark:text-indigo-400': sortBy === 'apiUpdateAvailable', 'rotate-180': sortBy === 'apiUpdateAvailable' && !sortAsc }"
+                                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                </svg>
+                                            </div>
+                                        </th>
+
+                                        @if(auth()->user()->isGlobalAdmin())
+                                        <th scope="col"
+                                            x-show="cols.backup"
+                                            class="px-6 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                            Backup
+                                        </th>
+                                        @endif
+                                        @if(!auth()->user()->isReadOnly())
+                                        <th scope="col" class="px-6 py-3 w-12"></th>
+                                        @endif
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                    <template x-for="firewall in filteredRows" :key="firewall.id">
+                                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition">
+                                            @if(!auth()->user()->isReadOnly())
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <input type="checkbox" name="firewall_ids[]" :value="firewall.id"
+                                                    form="bulkForm" class="firewall-checkbox">
+                                            </td>
+                                            @endif
+                                            @if(auth()->user()->isGlobalAdmin())
+                                                <td x-show="cols.company"
+                                                    class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                                    <a :href="firewall.company_url"
+                                                        class="text-indigo-600 hover:text-indigo-900 hover:underline dark:text-indigo-400 dark:hover:text-indigo-300"
+                                                        x-text="firewall.company_name">
+                                                    </a>
+                                                </td>
+                                            @endif
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="flex items-center space-x-2">
+                                                    <a :href="firewall.dashboard_url"
+                                                        class="font-medium text-indigo-600 hover:text-indigo-900 hover:underline dark:text-indigo-400 dark:hover:text-indigo-300"
+                                                        x-text="firewall.name">
+                                                    </a>
+                                                    <img
+                                                        :src="firewall.os_type === 'opnsense' ? 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/opnsense.svg' : 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/pfsense.svg'"
+                                                        :alt="firewall.os_display_name || (firewall.os_type === 'opnsense' ? 'OPNsense' : 'pfSense')"
+                                                        :title="firewall.os_display_name || (firewall.os_type === 'opnsense' ? 'OPNsense' : 'pfSense')"
+                                                        class="w-4 h-4 shrink-0 rounded"
+                                                        loading="lazy"
+                                                    >
+                                                </div>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <!-- Online/Offline Badge -->
+                                                <template x-if="firewall.isOnline !== null">
+                                                    <span
+                                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                                        :class="{
+                                                            'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200': firewall.isOnline === true,
+                                                            'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200': firewall.isOnline === false
+                                                        }">
+                                                        <svg class="-ml-0.5 mr-1.5 h-2 w-2" :class="{
+                                                                'text-green-400': firewall.isOnline === true,
+                                                                'text-red-400': firewall.isOnline === false
+                                                            }" fill="currentColor" viewBox="0 0 8 8">
+                                                            <circle cx="4" cy="4" r="3" />
+                                                        </svg>
+                                                        <span x-text="firewall.isOnline === true ? 'Online' : 'Offline'"></span>
+                                                    </span>
+                                                </template>
+                                                <!-- Skeleton Loading State (Null) -->
+                                                <template x-if="firewall.isOnline === null">
+                                                    <span class="inline-block w-16 h-5 bg-gray-200 dark:bg-gray-700 rounded-full animate-pulse"></span>
+                                                </template>
+                                            </td>
+                                            <td x-show="cols.host"
+                                                class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                                <a :href="firewall.linkUrl" target="_blank" rel="noopener noreferrer"
+                                                    class="text-indigo-600 hover:text-indigo-900 hover:underline dark:text-indigo-400 dark:hover:text-indigo-300"
+                                                    x-text="firewall.displayUrl">
+                                                </a>
+                                            </td>
+                                            <td x-show="cols.address"
+                                                class="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 dark:text-gray-400">
+                                                <template x-if="firewall.address">
+                                                    <a :href="'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(firewall.address)"
+                                                        target="_blank"
+                                                        class="has-tooltip inline-flex items-center justify-center text-indigo-600 hover:text-indigo-900 hover:underline dark:text-indigo-400 dark:hover:text-indigo-300"
+                                                        :data-tippy-content="firewall.address">
+                                                        <svg class="w-5 h-5" fill="none" stroke="currentColor"
+                                                            viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                                stroke-width="2"
+                                                                d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z">
+                                                            </path>
+                                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                                stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z">
+                                                            </path>
+                                                        </svg>
+                                                    </a>
+                                                </template>
+                                                <template x-if="!firewall.address">
+                                                    <svg class="w-5 h-5 text-red-300 dark:text-red-700 mx-auto"
+                                                        fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                                        title="No Address Provided">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                                    </svg>
+                                                </template>
+                                            </td>
+                                            <td x-show="cols.system"
+                                                class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                                <div class="flex items-center space-x-2">
+                                                    <span x-text="firewall.sysVersion"></span>
+                                                    <template x-if="firewall.sysUpdateAvailable">
+                                                        <span
+                                                            class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                                            title="Update Available">Update</span>
+                                                    </template>
+                                                    <template
+                                                        x-if="!firewall.sysUpdateAvailable && firewall.sysVersion !== '-'">
+                                                        <svg class="w-5 h-5 text-green-500" fill="none"
+                                                            stroke="currentColor" viewBox="0 0 24 24"
+                                                            title="Up to Date">
+                                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                                stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                                        </svg>
+                                                    </template>
+                                                </div>
+                                            </td>
+                                            <td x-show="cols.api"
+                                                class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                                <div class="flex items-center space-x-2">
+                                                    <!-- Error State: Long string (likely an error message) -->
+                                                    <template
+                                                        x-if="firewall.apiVersion && firewall.apiVersion !== '-' && firewall.apiVersion.length > 20">
+                                                        <span
+                                                            class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 has-tooltip"
+                                                            :data-tippy-content="'Error Details: ' + firewall.apiVersion">
+                                                            Error
+                                                        </span>
+                                                    </template>
+
+                                                    <!-- Valid Version State (including '-' or empty) -->
+                                                    <template
+                                                        x-if="!firewall.apiVersion || firewall.apiVersion === '-' || firewall.apiVersion.length <= 20">
+                                                        <div class="flex items-center space-x-2">
+                                                            <span x-text="firewall.apiVersion || '-'"></span>
+
+                                                            <!-- Update Badge -->
+                                                            <template x-if="firewall.apiUpdateAvailable">
+                                                                <span
+                                                                    class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                                                    title="Update Available">Update</span>
+                                                            </template>
+
+                                                            <!-- Checkmark (Up to Date) -->
+                                                            <template
+                                                                x-if="!firewall.apiUpdateAvailable && firewall.apiVersion && firewall.apiVersion !== '-' && firewall.apiVersion !== 'N/A'">
+                                                                <svg class="w-5 h-5 text-green-500" fill="none"
+                                                                    stroke="currentColor" viewBox="0 0 24 24"
+                                                                    title="Up to Date">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                                        stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                                                </svg>
+                                                            </template>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </td>
+
+                                            @if(auth()->user()->isGlobalAdmin())
+                                            <td x-show="cols.backup" class="px-6 py-4 whitespace-nowrap text-center">
+                                                <template x-if="firewall.backup_url">
+                                                    <a :href="firewall.backup_url"
+                                                        :title="'Download backup · ' + (firewall.backup_pulled_at ? new Date(firewall.backup_pulled_at).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '') + (firewall.backup_size_kb ? ' · ' + firewall.backup_size_kb + ' KB' : '')"
+                                                        class="inline-flex items-center justify-center text-green-500 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 transition-colors"
+                                                        aria-label="Download backup">
+                                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                                                        </svg>
+                                                    </a>
+                                                </template>
+                                                <template x-if="!firewall.backup_url">
+                                                    <span class="inline-flex items-center justify-center text-gray-300 dark:text-gray-600" title="No backup available">
+                                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/>
+                                                        </svg>
+                                                    </span>
+                                                </template>
+                                            </td>
+                                            @endif
+
+                                            @if(!auth()->user()->isReadOnly())
+                                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                <div class="relative flex justify-end" x-data="{ open: false, dropTop: 0, dropRight: 0 }" @click.away="open = false" @scroll.window.capture="open = false">
+                                                    <button @click="const r = $event.currentTarget.getBoundingClientRect(); dropTop = r.bottom + 4; dropRight = window.innerWidth - r.right; open = !open"
+                                                        class="p-1.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors focus:outline-none"
+                                                        aria-label="Row actions">
+                                                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
+                                                        </svg>
+                                                    </button>
+                                                    <div x-show="open" x-transition
+                                                        :style="'top:' + dropTop + 'px;right:' + dropRight + 'px;'"
+                                                        class="fixed w-36 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-[9999] py-1">
+                                                        <a :href="firewall.edit_url"
+                                                            class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">
+                                                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                                                            Edit
+                                                        </a>
+                                                        <button type="button"
+                                                            @click="open = false; openDeleteModal(firewall.delete_url, firewall.name)"
+                                                            class="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20">
+                                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                                            Delete
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            @endif
+                                        </tr>
+                                    </template>
+                                    <tr x-show="filteredRows.length === 0">
+                                        <td colspan="{{ (auth()->user()->isGlobalAdmin() ? 10 : 8) - (auth()->user()->isReadOnly() ? 2 : 0) }}"
+                                            class="px-6 py-4 text-center text-gray-500">
+                                            No firewalls found. <a href="{{ route('firewalls.create') }}"
+                                                class="text-blue-600 hover:underline">Add one now</a>.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            <x-modal name="delete-firewall-modal" :show="false" focusable>
+                                <div class="bg-white dark:bg-gray-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                                    <div class="sm:flex sm:items-start">
+                                        <div
+                                            class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20 sm:mx-0 sm:h-10 sm:w-10">
+                                            <svg class="h-6 w-6 text-red-600 dark:text-red-400" fill="none"
+                                                viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round"
+                                                    d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                            </svg>
+                                        </div>
+                                        <div class="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left w-full">
+                                            <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-gray-100">
+                                                {{ __('Delete Firewall') }}
+                                            </h3>
+                                            <div class="mt-2">
+                                                <p class="text-sm text-gray-500 dark:text-gray-400">
+                                                    {{ __('Are you sure you want to delete the firewall ') }} <span
+                                                        class="font-bold text-gray-900 dark:text-gray-100"
+                                                        x-text="firewallName"></span>?
+                                                    {{ __('This action cannot be undone.') }}
+                                                </p>
+                                                <p class="mt-4 text-sm text-gray-600 dark:text-gray-400">
+                                                    {{ __('Please type your email address to confirm:') }} <span
+                                                        class="font-mono font-bold">{{ auth()->user()->email }}</span>
+                                                </p>
+
+                                                <form :action="deleteAction" method="POST" id="delete-firewall-form"
+                                                    class="mt-4">
+                                                    @csrf
+                                                    @method('DELETE')
+                                                    <x-input-label for="confirm_email"
+                                                        value="{{ __('Email Address') }}" class="sr-only" />
+
+                                                    <x-text-input id="confirm_email" name="confirm_email" type="email"
+                                                        class="block w-full sm:w-3/4"
+                                                        placeholder="{{ __('Email Address') }}" x-model="confirmEmail"
+                                                        @keyup.enter="if(confirmEmail === '{{ auth()->user()->email }}') document.getElementById('delete-firewall-form').submit()" />
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="bg-gray-50 dark:bg-gray-700/50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+                                    <x-danger-button class="sm:ml-3 w-full sm:w-auto justify-center"
+                                        x-bind:disabled="confirmEmail !== '{{ auth()->user()->email }}'"
+                                        x-bind:class="{ 'opacity-50 cursor-not-allowed': confirmEmail !== '{{ auth()->user()->email }}' }"
+                                        @click="document.getElementById('delete-firewall-form').submit()">
+                                        {{ __('Delete Firewall') }}
+                                    </x-danger-button>
+                                    <x-secondary-button class="mt-3 sm:mt-0 w-full sm:w-auto justify-center"
+                                        @click="$dispatch('close')">
+                                        {{ __('Cancel') }}
+                                    </x-secondary-button>
+                                </div>
+                            </x-modal>
+
+                            {{-- Re-implement Delete Buttons properly since they were inside the form --}}
+                            {{-- Actually, delete forms need to be outside. --}}
+                            {{-- I will fix the wrapping in the next step or adjust now. --}}
+                            {{-- Strategy: Use JS for Bulk submit, don't wrap table in form. --}}
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                document.addEventListener('alpine:init', () => {
+                    Alpine.data('firewallStats', (allIds) => ({
+                        stats: {},
+                        loading: true,
+                        search: '',
+                        statusFilter: 'all',
+                        customerFilter: 'all',
+                        get totalCount() { return allIds.length; },
+                        get offlineCount() { return Object.values(this.stats).filter(s => !s.online).length; },
+                        get sysCount() { return Object.values(this.stats).filter(s => s.sys).length; },
+                        get apiCount() { return Object.values(this.stats).filter(s => s.api).length; },
+                        get hasData() { return Object.keys(this.stats).length > 0; },
+
+                        init() {
+                            // Smart Trigger: Wait for WS connection to avoid "Simultaneous Batch" (Sync Mode) 
+                            // and ensure we don't miss events (Race Condition).
+                            const checkAndTrigger = () => {
+                                if (window.Echo && window.Echo.connector && window.Echo.connector.pusher) {
+                                    const state = window.Echo.connector.pusher.connection.state;
+
+                                    // If connected, go!
+                                    if (state === 'connected') {
+                                        this.triggerUpdate();
+                                        return;
+                                    }
+
+                                    // If connecting, wait for it...
+                                    if (state === 'connecting' || state === 'initialized') {
+                                        const onConnect = () => {
+                                            this.triggerUpdate();
+                                            window.Echo.connector.pusher.connection.unbind('connected', onConnect);
+                                        };
+                                        window.Echo.connector.pusher.connection.bind('connected', onConnect);
+                                        // Fallback if connection takes too long
+                                        setTimeout(() => {
+                                            if (this.loading) this.triggerUpdate(); // Will force sync if still not connected
+                                        }, 3000);
+                                        return;
+                                    }
+                                }
+
+                                // If disconnected or no Echo, just trigger (will use Sync Fallback)
+                                this.triggerUpdate();
+                            };
+
+                            checkAndTrigger();
+
+                            // 3. Listen for WebSocket updates from the jobs
+                            window.addEventListener('firewall-updated', (e) => {
+                                const { id, online, sys, api } = e.detail;
+                                this.stats[id] = { online, sys, api };
+                                if (Object.keys(this.stats).length >= this.totalCount) {
+                                    this.loading = false;
+                                }
+                            });
+
+                            // Safety fallback
+                            setTimeout(() => { this.loading = false; }, 10000);
+
+                            // Dynamic Intervals from Settings
+                            this.realtimeMs = {{ ($settings['realtime_interval'] ?? 10) * 1000 }};
+                            this.fallbackMs = {{ ($settings['fallback_interval'] ?? 30) * 1000 }};
+                            this.timer = null;
+
+                            this.startIntervalManager();
+                        },
+
+                        startIntervalManager() {
+                            if (this.timer) clearTimeout(this.timer);
+
+                            const run = () => {
+                                // triggerUpdate() dispatches CheckFirewallStatusJob per firewall.
+                                // It is currently the only mechanism keeping the pfSense cache fresh.
+                                // Must always run regardless of WS state until Phase 1.5 adds a
+                                // true backend scheduler. Step 4 deduplication prevents WS floods.
+                                this.triggerUpdate();
+                                this.timer = setTimeout(run, this.fallbackMs);
+                            };
+
+                            // Always schedule at fallbackMs — realtimeMs is retired for this loop.
+                            this.timer = setTimeout(run, this.fallbackMs);
+                        },
+
+                        async triggerUpdate() {
+                            const tokenEl = document.querySelector('meta[name="csrf-token"]');
+                            const token = tokenEl ? tokenEl.getAttribute('content') : '';
+
+                            // Intelligent Failover:
+                            // Only force synchronous check if WebSocket is EXPLICITLY disconnected/dead.
+                            // If it's 'connecting', we trust the backend jobs will broadcast eventually.
+                            let url = '{{ route("firewalls.refresh-all") }}';
+
+                            const state = window.Echo?.connector?.pusher?.connection?.state;
+                            let isExplicitlyDisconnected = (state === 'disconnected' || state === 'failed' || state === 'unavailable');
+                            if (!window.Echo) isExplicitlyDisconnected = true;
+
+                            if (isExplicitlyDisconnected) {
+                                // console.warn('WebSocket disconnected. Forcing synchronous update.');
+                                url += '?sync=true';
+                            }
+
+                            try {
+                                const res = await fetch(url, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-CSRF-TOKEN': token
+                                    },
+                                    body: JSON.stringify({ ids: allIds })
+                                });
+                                const data = await res.json();
+
+                                // If we get immediate results (Sync Mode), use them to update UI
+                                if (data.results) {
+                                    Object.entries(data.results).forEach(([id, r]) => {
+                                        // r is the Wrapper: { online: bool, data: ServiceResult, api_version: ... }
+                                        let serviceResult = r.data || {};
+                                        let realData = (serviceResult.data && typeof serviceResult.data === 'object') ? serviceResult.data : serviceResult;
+
+                                        const sysUp = (realData.update_available === true);
+                                        const apiUp = (realData.api_update_available === true);
+
+                                        window.dispatchEvent(new CustomEvent('firewall-updated', {
+                                            detail: {
+                                                id: parseInt(id),
+                                                online: r.online,
+                                                sys: sysUp,
+                                                api: apiUp,
+                                                data: serviceResult,
+                                                apiVersion: r.api_version || realData.api_version || '-'
+                                            }
+                                        }));
+                                    });
+                                }
+                            } catch (err) {
+                                console.error('Update trigger failed:', err);
+                            }
+                        }
+                    }));
+
+                    Alpine.data('firewallRow', (id, statusData, checkPath, searchData, companyName) => ({
+                        id: id,
+                        // statusData is the Wrapper { online: bool, data: ServiceResult }
+                        isOnline: statusData && statusData.online,
+
+                        // Helper to extract nested version
+                        sysVersion: (function () {
+                            if (!statusData || !statusData.data || !statusData.data.data) return '-';
+                            return statusData.data.data.product_version || statusData.data.data.version || '-';
+                        })(),
+
+                        apiVersion: (statusData && statusData.api_version) ||
+                            (statusData && statusData.data && statusData.data.api_version) ||
+                            '-',
+
+                        sysUpdateAvailable: (statusData && statusData.data && statusData.data.data && statusData.data.data.update_available === true),
+                        apiUpdateAvailable: (statusData && statusData.data && statusData.data.data && statusData.data.data.api_update_available === true),
+
+                        // Only show loading skeleton if we have NO data at all
+                        loading: !statusData,
+                        searchData: searchData,
+                        companyName: companyName,
+
+                        checkVisibility(search, statusFilter, customerFilter) {
+                            search = (search || '').toLowerCase();
+                            const matchesSearch = search === '' || this.searchData.includes(search);
+
+                            const matchesStatus = statusFilter === 'all'
+                                || (statusFilter === 'online' && this.isOnline)
+                                || (statusFilter === 'offline' && !this.isOnline);
+
+                            const matchesCustomer = customerFilter === 'all' || this.companyName === customerFilter;
+
+                            return matchesSearch && matchesStatus && matchesCustomer;
+                        },
+
+                        init() {
+                            // 1. Universal Update Listener (Handles both HTTP/Sync and internal events)
+                            // This allows the row to update when the parent 'triggerUpdate' fetches data via HTTP
+                            window.addEventListener('firewall-updated', (e) => {
+                                if (e.detail.id === this.id) {
+                                    this.isOnline = e.detail.online;
+                                    this.loading  = false;
+
+                                    // e.detail.data is the flat e.status object — no .data nesting.
+                                    const s = e.detail.data || {};
+                                    this.sysVersion         = s.product_version || '-';
+                                    this.apiVersion         = e.detail.apiVersion || '-';
+                                    this.sysUpdateAvailable = e.detail.sys  === true;
+                                    this.apiUpdateAvailable = e.detail.api  === true;
+                                }
+                            });
+
+                            // 2. WebSocket Listener
+                            if (window.Echo) {
+                                window.Echo.private('firewall.' + this.id)
+                                    .listen('.firewall.status.update', (e) => {
+                                        // Flat payload — access e.status.* directly, no .data nesting.
+                                        const s = e.status || {};
+                                        this.isOnline           = s.online ?? true;
+                                        this.loading            = false;
+                                        this.sysVersion         = s.product_version || '-';
+                                        this.apiVersion         = s.api_version || '-';
+                                        this.sysUpdateAvailable = s.update_available     === true;
+                                        this.apiUpdateAvailable = s.api_update_available === true;
+
+                                        // Dispatch to parent (firewallStats) and main Alpine component
+                                        window.dispatchEvent(new CustomEvent('firewall-updated', {
+                                            detail: {
+                                                id:         this.id,
+                                                online:     this.isOnline,
+                                                sys:        this.sysUpdateAvailable,
+                                                api:        this.apiUpdateAvailable,
+                                                data:       s,          // flat — callers read s.product_version etc.
+                                                apiVersion: this.apiVersion
+                                            }
+                                        }));
+                                    });
+                            }
+
+                            // 4. Fallback Watchdog
+                            setTimeout(() => {
+                                if (this.loading) {
+                                    // console.warn('Firewall ' + this.id + ' stuck loading.');
+                                }
+                            }, 15000);
+                        },
+
+                        checkStatus(url) {
+                            // Manual refresh fallback
+
+                            fetch(url + '?t=' + Date.now())
+                                .then(res => res.json())
+                                .then(data => {
+                                    this.isOnline = data.online;
+                                    // .. logic here is similar but likely unused if we rely on triggerUpdate()
+                                    // keeping minimal fallback
+                                    this.loading = false;
+                                })
+                                .catch(() => { this.loading = false; });
+                        }
+                    }));
+                });
+
+                function toggleSelectAll() {
+                    const checkboxes = document.querySelectorAll('.firewall-checkbox');
+                    const selectAll = document.getElementById('selectAll');
+                    checkboxes.forEach(cb => cb.checked = selectAll.checked);
+                }
+
+                function submitBulkAction() {
+                    const action = document.getElementById('bulkActionSelect').value;
+                    if (!action) {
+                        alert('Please select an action.');
+                        return;
+                    }
+
+                    const checkboxes = document.querySelectorAll('.firewall-checkbox:checked');
+                    const ids = Array.from(checkboxes).map(cb => cb.value);
+
+                    if (ids.length === 0) {
+                        alert('Please select at least one firewall.');
+                        return;
+                    }
+
+                    if (action === 'deploy' || action.startsWith('deploy_')) {
+                        const kind = action === 'deploy' ? '' : action.replace('deploy_', '');
+                        const q = ids.map(id => `firewall_ids[]=${id}`).join('&') + (kind ? `&kind=${kind}` : '');
+                        window.location.href = `{{ route('deployments.create') }}?${q}`;
+                        return;
+                    }
+
+                    if (action.startsWith('create_')) {
+                        // Redirect to create page
+                        const type = action.replace('create_', '');
+                        const url = `{{ url('/firewalls/bulk/create') }}/${type}`;
+                        // Append IDs
+                        const queryString = ids.map(id => `firewall_ids[]=${id}`).join('&');
+                        window.location.href = `${url}?${queryString}`;
+                    } else {
+                        // POST action (reboot/update)
+                        if (action === 'reboot') {
+                            if (!confirm('WARNING: Are you sure you want to REBOOT the selected firewalls? usage of this command will cause network downtime.')) {
+                                return;
+                            }
+                        } else if (!confirm('Are you sure you want to perform this action on selected firewalls?')) {
+                            return;
+                        }
+                        const form = document.getElementById('bulkForm');
+                        form.submit();
+                    }
+                }
+            </script>
+</x-app-layout>

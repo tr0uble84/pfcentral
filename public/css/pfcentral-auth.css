@@ -1,0 +1,152 @@
+/*
+ * PFCentral sign-in pages (login, forgot / reset password, two-factor).
+ * Plain CSS on purpose: these pages must look right even before the server has rebuilt its Tailwind assets.
+ */
+:root {
+    --pfc-navy: #0E2238;
+    --pfc-navy-2: #0B1D30;
+    --pfc-cyan: #33C5F3;
+    --pfc-cyan-2: #12A8DE;
+    --pfc-text: #E2E8F0;
+    --pfc-muted: #94A3B8;
+    --pfc-line: rgba(255, 255, 255, 0.12);
+    --pfc-danger: #FCA5A5;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body.pfc-auth {
+    font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: var(--pfc-text);
+    background: radial-gradient(1200px 700px at 28% 45%, #15406a 0%, var(--pfc-navy) 55%, #081626 100%);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+}
+.pfc-auth ::selection { background: var(--pfc-cyan); color: var(--pfc-navy); }
+#pfc-scene { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 1.2s cubic-bezier(.16, 1, .3, 1); }
+.pfc-webgl-ready #pfc-scene { opacity: 1; }
+.pfc-fallback { display: none; position: fixed; inset: 0; align-items: center; justify-content: center; pointer-events: none; }
+.pfc-fallback img { width: 220px; opacity: .9; }
+.pfc-no-webgl .pfc-fallback { display: flex; }
+
+.pfc-shell { position: relative; z-index: 1; min-height: 100%; display: flex; flex-direction: column; }
+.pfc-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 32px 0; }
+.pfc-brand { display: inline-flex; align-items: center; gap: 14px; color: inherit; text-decoration: none; border-radius: 8px; }
+.pfc-brand img { height: 30px; width: auto; display: block; }
+.pfc-brand-sep { width: 1px; height: 24px; background: var(--pfc-line); }
+.pfc-brand-product { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; color: #fff; }
+.pfc-gear {
+    display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px;
+    color: #CBD5E1; text-decoration: none; font-size: 14px; font-weight: 500;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid var(--pfc-line); transition: background .2s, color .2s;
+}
+.pfc-gear:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.pfc-gear svg { width: 18px; height: 18px; transition: transform .5s cubic-bezier(.16, 1, .3, 1); }
+.pfc-gear:hover svg { transform: rotate(90deg); }
+
+.pfc-main { flex: 1; display: flex; align-items: center; justify-content: flex-end; padding: 24px 8vw 24px 24px; }
+.pfc-panel {
+    width: 100%; max-width: 420px; padding: 32px; border-radius: 18px;
+    background: rgba(11, 29, 48, 0.9); border: 1px solid var(--pfc-line);
+    box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.65);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+.pfc-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 0 32px 20px; font-size: 12px; color: var(--pfc-muted); }
+.pfc-foot p { margin: 0; }
+.pfc-foot .num { font-variant-numeric: tabular-nums; }
+
+/* Panel content */
+.pfc-panel h1 { margin: 0; font-size: 26px; line-height: 1.2; font-weight: 650; letter-spacing: -0.02em; color: #fff; }
+.pfc-panel .pfc-lead { margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: var(--pfc-muted); }
+.pfc-panel p { font-size: 14px; line-height: 1.55; color: #CBD5E1; }
+.pfc-panel label, .pfc-label { display: block; font-size: 14px; font-weight: 500; color: #CBD5E1; }
+.pfc-panel form > * + * { margin-top: 16px; }
+.pfc-panel input[type=email], .pfc-panel input[type=password], .pfc-panel input[type=text] {
+    display: block; width: 100%; margin-top: 6px; padding: 11px 14px; font: inherit; font-size: 15px;
+    color: #F1F5F9; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px;
+    outline: none; transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.pfc-panel input::placeholder { color: #64748B; }
+.pfc-panel input[type=email]:focus, .pfc-panel input[type=password]:focus, .pfc-panel input[type=text]:focus {
+    border-color: var(--pfc-cyan); box-shadow: 0 0 0 3px rgba(51, 197, 243, 0.25); background: rgba(255, 255, 255, 0.08);
+}
+.pfc-panel input:-webkit-autofill { -webkit-box-shadow: 0 0 0 40px #0F2740 inset; -webkit-text-fill-color: #F1F5F9; caret-color: #F1F5F9; }
+.pfc-panel input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(--pfc-cyan); }
+.pfc-check { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; color: var(--pfc-muted); cursor: pointer; }
+.pfc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pfc-link { color: #7DD8F8; font-size: 13px; font-weight: 500; text-decoration: none; }
+.pfc-link:hover { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+.pfc-pass { position: relative; }
+.pfc-pass input { padding-right: 46px; }
+.pfc-pass button {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%); margin-top: 3px;
+    display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 8px;
+    background: transparent; color: var(--pfc-muted); cursor: pointer;
+}
+.pfc-pass button:hover { color: #fff; }
+.pfc-pass svg { width: 20px; height: 20px; }
+
+/* Buttons (also styles the stock Laravel buttons on the other sign-in pages) */
+.pfc-btn, .pfc-panel button[type=submit]:not(.pfc-btn-ghost) {
+    display: flex; width: 100%; align-items: center; justify-content: center; gap: 8px;
+    padding: 13px 18px; font: inherit; font-size: 15px; font-weight: 650; letter-spacing: 0; text-transform: none;
+    color: var(--pfc-navy); background: linear-gradient(180deg, #4ED0F6 0%, var(--pfc-cyan) 55%, #22B6E6 100%);
+    border: 0; border-radius: 10px; cursor: pointer; text-decoration: none;
+    box-shadow: 0 10px 24px -10px rgba(51, 197, 243, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    transition: transform .15s ease, box-shadow .2s ease, filter .2s ease;
+}
+.pfc-btn:hover, .pfc-panel button[type=submit]:not(.pfc-btn-ghost):hover { filter: brightness(1.06); box-shadow: 0 14px 30px -10px rgba(51, 197, 243, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.4); }
+.pfc-btn:active, .pfc-panel button[type=submit]:active { transform: translateY(1px); }
+.pfc-btn[disabled] { opacity: .7; cursor: progress; }
+.pfc-btn-ghost {
+    display: flex; width: 100%; align-items: center; justify-content: center; gap: 8px;
+    padding: 11px 18px; font: inherit; font-size: 14px; font-weight: 500; color: #CBD5E1;
+    background: transparent; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 10px; cursor: pointer; text-decoration: none;
+    transition: background .2s, color .2s, border-color .2s;
+}
+.pfc-btn-ghost:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.28); color: #fff; }
+.pfc-btn-ms {
+    display: flex; width: 100%; align-items: center; justify-content: center; gap: 12px;
+    padding: 13px 18px; font-size: 15px; font-weight: 600; color: #1E293B; background: #fff;
+    border-radius: 10px; text-decoration: none; box-shadow: 0 8px 22px -12px rgba(0, 0, 0, 0.6); transition: background .2s;
+}
+.pfc-btn-ms:hover { background: #F1F5F9; }
+.pfc-btn-ms svg { width: 20px; height: 20px; }
+.pfc-panel :focus-visible { outline: 2px solid var(--pfc-cyan); outline-offset: 2px; }
+.pfc-or { display: flex; align-items: center; gap: 12px; margin: 22px 0; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #64748B; }
+.pfc-or::before, .pfc-or::after { content: ""; height: 1px; flex: 1; background: var(--pfc-line); }
+.pfc-note { margin-top: 18px; padding: 10px 14px; border-radius: 10px; font-size: 14px; line-height: 1.45; }
+.pfc-note.ok { color: #A7F3D0; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(52, 211, 153, 0.25); }
+.pfc-note.err { color: #FECACA; background: rgba(244, 63, 94, 0.1); border: 1px solid rgba(251, 113, 133, 0.25); }
+.pfc-panel ul.text-sm, .pfc-error { margin: 8px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--pfc-danger); }
+.pfc-spin { width: 16px; height: 16px; animation: pfc-spin 0.8s linear infinite; }
+@keyframes pfc-spin { to { transform: rotate(360deg); } }
+.pfc-hidden { display: none !important; }
+
+@media (max-width: 1023px) {
+    .pfc-main { justify-content: center; align-items: flex-end; padding: 34vh 16px 24px; }
+}
+@media (max-width: 640px) {
+    .pfc-top { padding: 16px 16px 0; }
+    .pfc-brand img { height: 24px; }
+    .pfc-brand-product { font-size: 15px; }
+    .pfc-gear span { display: none; }
+    .pfc-panel { padding: 24px; border-radius: 16px; }
+    .pfc-foot { padding: 0 16px 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+}
+
+/* Checkbox drawn to match the dark panel */
+.pfc-panel input[type=checkbox] {
+    -webkit-appearance: none; appearance: none; display: inline-grid; place-content: center;
+    width: 18px; height: 18px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.06); cursor: pointer; transition: background .15s, border-color .15s;
+}
+.pfc-panel input[type=checkbox]::after {
+    content: ""; width: 10px; height: 10px; transform: scale(0); transition: transform .12s ease-out;
+    background: var(--pfc-navy);
+    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+.pfc-panel input[type=checkbox]:checked { background: var(--pfc-cyan); border-color: var(--pfc-cyan); }
+.pfc-panel input[type=checkbox]:checked::after { transform: scale(1); }

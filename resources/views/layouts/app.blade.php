@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+@php
+    $settings    = \App\Models\SystemSetting::pluck('value', 'key')->toArray();
+    $systemTheme = $settings['theme'] ?? 'light';
+    $userPref    = Auth::check() ? Auth::user()->theme_preference : null;
+    // null/'default' → system setting, 'auto' → OS (SSR falls back to system),
+    // 'light'/'dark' → explicit user choice
+    $theme = match($userPref) {
+        'light'  => 'light',
+        'dark'   => 'dark',
+        default  => $systemTheme, // null (default) and 'auto' both SSR as system theme
+    };
+@endphp
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}"
+    class="{{ $theme === 'dark' ? 'dark' : '' }} h-full bg-gray-100 dark:bg-gray-900 overflow-hidden">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+
+    {{-- FOUC prevention for OS-auto mode:
+         The server renders with the system theme as a safe SSR fallback.
+         This inline script runs before any stylesheet and corrects the dark
+         class immediately based on the real OS preference. --}}
+    @if($userPref === 'auto')
+    <script>
+    (function () {
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.classList.toggle('dark', prefersDark);
+    }());
+    </script>
+    @endif
+
+    <title>{{ isset($title) ? $title . ' · ' : '' }}{{ config('brand.name') }}</title>
+
+    <!-- Favicon -->
+    @php
+        $favicon = $settings['icon_path'] ?? ($settings['favicon_path'] ?? ($settings['logo_path'] ?? asset('favicon.svg')));
+    @endphp
+    <link rel="icon" href="{{ $favicon }}">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.bunny.net">
+    <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700,800&display=swap" rel="stylesheet" />
+
+    <!-- Scripts -->
+    <script>
+        const protocol = window.location.protocol;
+        const isSecure = protocol === 'https:';
+        window.PFCentralConfig = {
+            reverb: {
+                key: "{{ env('VITE_REVERB_APP_KEY') }}",
+                host: window.location.hostname,
+                port: window.location.port || (isSecure ? 443 : 80),
+                scheme: isSecure ? 'https' : 'http'
+            }
+        };
+    </script>
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
+
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+
+        .form-input-reset {
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            background-color: transparent !important;
+        }
+    </style>
+    @include('layouts.fast-nav')
+    <link rel="manifest" href="{{ route('manifest') }}">
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('/sw.js').then(function (registration) {
+                    console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                }, function (err) {
+                    console.log('ServiceWorker registration failed: ', err);
+                });
+            });
+        }
+    </script>
+</head>
+
+<body class="font-sans antialiased h-full overflow-hidden bg-gray-100 dark:bg-gray-900 flex flex-col"
+    x-data="{ sidebarOpen: false, collapsed: window.innerWidth < 1536 }"
+    @resize.window="collapsed = window.innerWidth < 1536">
+    <div id="pfc-nav-bar" aria-hidden="true"></div>
+    <!-- Global System Update Listener -->
+    @if(auth()->user()?->isGlobalAdmin())
+        <div x-data="systemUpdateListener()" x-cloak class="z-50 relative shrink-0">
+            <!-- Unified Update Bar -->
+            <!-- Notification Bar -->
+            <div x-show="(updateAvailable || isInstalling || updateComplete) && !dismissedSession" style="display: none;"
+                x-transition:enter="transform ease-out duration-300 transition"
+                x-transition:enter-start="translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-2"
+                x-transition:enter-end="translate-y-0 opacity-100 sm:translate-x-0" :class="{
+                                                            'bg-blue-600': updateAvailable && !isInstalling && !updateComplete,
+                                                            'bg-blue-500': isInstalling,
+                                                            'bg-green-600': updateComplete
+                                                        }">
+                <div class="max-w-7xl mx-auto py-3 px-3 sm:px-6 lg:px-8">
+                    <div class="flex items-center justify-between flex-wrap">
+                        <div class="w-0 flex-1 flex items-center">
+                            <span class="flex p-2 rounded-lg" :class="{
+                                                                        'bg-blue-800': updateAvailable && !isInstalling && !updateComplete,
+                                                                        'bg-blue-600': isInstalling,
+                                                                        'bg-green-800': updateComplete
+                                                                    }">
+                                <!-- Icon: Update Available -->
+                                <template x-if="updateAvailable && !isInstalling && !updateComplete">
+                                    <svg class="h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                        viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                    </svg>
+                                </template>
+
+                                <!-- Icon: Installing (Spinner) -->
+                                <template x-if="isInstalling">
+                                    <svg class="animate-spin h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg"
+                                        fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                            stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor"
+                                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                        </path>
+                                    </svg>
+                                </template>
+
+                                <!-- Icon: Complete -->
+                                <template x-if="updateComplete">
+                                    <svg class="h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                        viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </template>
+                            </span>
+
+                            <p class="ml-3 font-medium text-white truncate">
+                                <span x-show="updateAvailable && !isInstalling && !updateComplete">
+                                    A new update is available (<span x-text="availableVersion"></span><template x-if="isPrerelease"><span class="ml-1.5 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-bold bg-amber-400 text-amber-900">PRE-RELEASE</span></template>).
+                                </span>
+                                <span x-show="isInstalling">
+                                    Installation in progress. Please wait...
+                                </span>
+                                <span x-show="updateComplete">
+                                    Update complete. Reload to apply changes.
+                                </span>
+                            </p>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="order-3 mt-2 flex-shrink-0 w-full sm:order-2 sm:mt-0 sm:w-auto">
+                            <!-- Button: Update Now -->
+                            <button x-show="updateAvailable && !isInstalling && !updateComplete" type="button"
+                                @click="startUpdate"
+                                class="flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-blue-600 bg-white hover:bg-blue-50">
+                                Update Now
+                            </button>
+
+                            <!-- Button: Reload Now -->
+                            <button x-show="updateComplete" type="button" @click="reloadPage"
+                                class="flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-green-600 bg-white hover:bg-green-50">
+                                Reload Now
+                            </button>
+                        </div>
+
+                        <!-- Dismiss (Only when Available) -->
+                        <div x-show="updateAvailable && !isInstalling && !updateComplete"
+                            class="order-2 flex-shrink-0 sm:order-3 sm:ml-3">
+                            <button type="button" @click="dismissUpdate()"
+                                class="-mr-1 flex p-2 rounded-md hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-white sm:-mr-2">
+                                <span class="sr-only">Dismiss</span>
+                                <svg class="h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                    viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    <!-- Mobile Header -->
+    <div
+        class="md:hidden flex items-center justify-between h-16 bg-brand-950 border-b border-white/10 px-4 z-40 relative">
+        <a href="{{ route('dashboard') }}">
+            @if(isset($settings['logo_path']))
+                <img src="{{ $settings['logo_path'] }}" class="block h-8 w-auto" alt="Logo">
+            @else
+                <x-brand-logo compact />
+            @endif
+        </a>
+        <button @click="sidebarOpen = !sidebarOpen" class="text-gray-400 hover:text-white focus:outline-none">
+            <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+        </button>
+    </div>
+
+    <div class="flex-1 flex bg-gray-100 dark:bg-gray-900 overflow-hidden">
+        @include('layouts.sidebar')
+
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <!-- Page Heading -->
+            @isset($header)
+                <header class="bg-white dark:bg-gray-800 shadow z-10">
+                    <div class="max-w-full mx-auto py-6 px-4 sm:px-6 lg:px-8">
+                        {{ $header }}
+                    </div>
+                </header>
+            @endisset
+
+            @if(request()->route('firewall'))
+                @include('layouts.navigation')
+            @endif
+
+            <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 dark:bg-gray-900 pb-20">
+
+                <!-- Page Content -->
+                @isset($firewall)
+                    <div class="max-w-full mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+                        <x-apply-changes-banner :firewall="$firewall" />
+                    </div>
+                @endisset
+
+
+                {{ $slot }}
+
+                <footer class="mt-10 px-4 sm:px-6 lg:px-8 py-6 border-t border-gray-200/70 dark:border-white/5 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-xs text-gray-500 dark:text-gray-400">
+                    <p>&copy; {{ max(now()->year, config('brand.since')) }} {{ config('brand.owner') }}. All rights reserved. {{ config('brand.name') }} is a product of {{ config('brand.owner') }}.</p>
+                    <button type="button" @click="$dispatch('open-whats-new')" class="tabular-nums hover:text-brand-700 dark:hover:text-brand-300 focus:outline-none focus-visible:underline">
+                        {{ config('brand.name') }} {{ \App\Support\ReleaseNotes::currentVersion() }} &middot; What's new
+                    </button>
+                </footer>
+            </main>
+        </div>
+    </div>
+    @auth
+        <x-whats-new />
+    @endauth
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+        // Set Default Options for SweetAlert2 to prevent layout shifts
+        const Toast = Swal.mixin({
+            toast: true,
+            position: 'top-end',
+            showConfirmButton: false,
+            timer: 3000,
+            timerProgressBar: true
+        });
+
+        // Global Override to prevent body padding shift
+        const swalFire = Swal.fire;
+        Swal.fire = function (args) {
+            // If args is an object, merge defaults
+            if (typeof args === 'object' && args !== null) {
+                args.heightAuto = false;
+                args.scrollbarPadding = false;
+            }
+            return swalFire.apply(this, arguments);
+        };
+    </script>
+
+    {{-- ── Global JS toast helper (replaces Swal toasts site-wide) ──────────────────────── --}}
+    <script>
+        /**
+         * Show a toast using the same Alpine-powered design as server flash toasts.
+         * @param {'success'|'error'|'warning'|'info'} type
+         * @param {string} title  Bold heading
+         * @param {string} msg    Body text (optional)
+         * @param {number} ms     Auto-dismiss ms (default 4000; 0 = persistent)
+         */
+        window.showToast = function(type, title, msg, ms) {
+            msg = msg || '';
+            ms  = (ms === undefined) ? 4000 : ms;
+            const container = document.querySelector('.fixed.top-6.right-6');
+            if (!container) return;
+
+            const C = {
+                success: { ring:'bg-green-100 dark:bg-green-900/50', icon:'text-green-600 dark:text-green-400', bar:'bg-green-500', fill:true,
+                    svg:'<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>'},
+                error:   { ring:'bg-red-100 dark:bg-red-900/50',   icon:'text-red-600 dark:text-red-400',   bar:'bg-red-500',   fill:false,
+                    svg:'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>'},
+                warning: { ring:'bg-amber-100 dark:bg-amber-900/50',icon:'text-amber-600 dark:text-amber-400',bar:'bg-amber-500',fill:false,
+                    svg:'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>'},
+                info:    { ring:'bg-blue-100 dark:bg-blue-900/50',  icon:'text-blue-600 dark:text-blue-400',  bar:'bg-blue-500',  fill:false,
+                    svg:'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'},
+            };
+            const c = C[type] || C.info;
+            const vb = c.fill ? '0 0 20 20' : '0 0 24 24';
+
+            const el = document.createElement('div');
+            el.className = 'pointer-events-auto w-80 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden';
+            el.style.cssText = 'opacity:0;transform:translateX(2rem) scale(.95);transition:opacity .3s,transform .3s';
+            el.innerHTML = `
+                <div class="flex items-start gap-3 px-4 py-3.5">
+                    <div class="w-8 h-8 rounded-full ${c.ring} flex items-center justify-center shrink-0">
+                        <svg class="w-4 h-4 ${c.icon}" fill="${c.fill?'currentColor':'none'}" stroke="${c.fill?'none':'currentColor'}" viewBox="${vb}">${c.svg}</svg>
+                    </div>
+                    <div class="flex-1 min-w-0 pt-0.5">
+                        <p class="text-sm font-medium text-gray-900 dark:text-gray-100">${title}</p>
+                        ${msg ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${msg}</p>` : ''}
+                    </div>
+                    <button type="button" class="_toast-close text-gray-300 hover:text-gray-500 dark:hover:text-gray-200 transition-colors shrink-0 mt-0.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="h-0.5 bg-gray-100 dark:bg-gray-700"><div class="_toast-bar h-full ${c.bar} transition-all duration-100 ease-linear" style="width:100%"></div></div>`;
+
+            container.appendChild(el);
+            requestAnimationFrame(() => { el.style.opacity='1'; el.style.transform='translateX(0) scale(1)'; });
+
+            const dismiss = () => { el.style.opacity='0'; el.style.transform='translateX(2rem) scale(.95)'; setTimeout(() => el.remove(), 300); };
+            el.querySelector('._toast-close').addEventListener('click', dismiss);
+
+            if (ms > 0) {
+                const bar = el.querySelector('._toast-bar');
+                let pct = 100;
+                const iv = setInterval(() => {
+                    pct -= (100 / (ms / 100));
+                    if (bar) bar.style.width = Math.max(0, pct) + '%';
+                    if (pct <= 0) { clearInterval(iv); dismiss(); }
+                }, 100);
+            }
+        };
+
+        window.showSuccessToast = (msg, title) => window.showToast('success', title || 'Success', msg);
+        window.showErrorToast   = (msg, title) => window.showToast('error',   title || 'Error',   msg);
+        window.showWarningToast = (msg, title) => window.showToast('warning', title || 'Warning', msg);
+        window.showInfoToast    = (msg, title) => window.showToast('info',    title || 'Info',    msg);
+    </script>
+
+    {{-- ── Global flash toasts (top-right) ────────────────────────────── --}}
+    <div class="fixed top-6 right-6 z-50 flex flex-col gap-3 items-end pointer-events-none">
+
+        @if(session('success'))
+            <div x-data="{
+                     show: true, progress: 100,
+                     init() {
+                         const iv = setInterval(() => {
+                             this.progress -= 2.5;
+                             if (this.progress <= 0) { clearInterval(iv); this.show = false; }
+                         }, 100);
+                     }
+                 }"
+                 x-show="show"
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0 translate-x-8 scale-95"
+                 x-transition:enter-end="opacity-100 translate-x-0 scale-100"
+                 x-transition:leave="transition ease-in duration-200"
+                 x-transition:leave-start="opacity-100 translate-x-0 scale-100"
+                 x-transition:leave-end="opacity-0 translate-x-8 scale-95"
+                 class="pointer-events-auto w-80 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
+                <div class="flex items-start gap-3 px-4 py-3.5">
+                    <div class="w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/50 flex items-center justify-center shrink-0">
+                        <svg class="w-4 h-4 text-green-600 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                    </div>
+                    <div class="flex-1 min-w-0 pt-0.5">
+                        <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Success!</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ session('success') }}</p>
+                    </div>
+                    <button type="button" @click="show = false" class="text-gray-300 hover:text-gray-500 dark:hover:text-gray-200 transition-colors shrink-0 mt-0.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="h-0.5 bg-gray-100 dark:bg-gray-700">
+                    <div class="h-full bg-green-500 dark:bg-green-400 transition-all duration-100 ease-linear" :style="`width: ${progress}%`"></div>
+                </div>
+            </div>
+        @endif
+
+        @if(session('error'))
+            <div x-data="{ show: true }"
+                 x-show="show"
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0 translate-x-8 scale-95"
+                 x-transition:enter-end="opacity-100 translate-x-0 scale-100"
+                 x-transition:leave="transition ease-in duration-200"
+                 x-transition:leave-start="opacity-100 translate-x-0 scale-100"
+                 x-transition:leave-end="opacity-0 translate-x-8 scale-95"
+                 class="pointer-events-auto w-80 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
+                <div class="flex items-start gap-3 px-4 py-3.5">
+                    <div class="w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center shrink-0">
+                        <svg class="w-4 h-4 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </div>
+                    <div class="flex-1 min-w-0 pt-0.5">
+                        <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Error</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ session('error') }}</p>
+                    </div>
+                    <button type="button" @click="show = false" class="text-gray-300 hover:text-gray-500 dark:hover:text-gray-200 transition-colors shrink-0 mt-0.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="h-0.5 bg-red-200 dark:bg-red-900/60"></div>
+            </div>
+        @endif
+
+        @if($errors->any())
+            <div x-data="{ show: true }"
+                 x-show="show"
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0 translate-x-8 scale-95"
+                 x-transition:enter-end="opacity-100 translate-x-0 scale-100"
+                 x-transition:leave="transition ease-in duration-200"
+                 x-transition:leave-start="opacity-100 translate-x-0 scale-100"
+                 x-transition:leave-end="opacity-0 translate-x-8 scale-95"
+                 class="pointer-events-auto w-80 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
+                <div class="flex items-start gap-3 px-4 py-3.5">
+                    <div class="w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center shrink-0">
+                        <svg class="w-4 h-4 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                    </div>
+                    <div class="flex-1 min-w-0 pt-0.5">
+                        <p class="text-sm font-medium text-gray-900 dark:text-gray-100">Couldn't save</p>
+                        <ul class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 space-y-0.5">
+                            @foreach($errors->all() as $error)
+                                <li>{{ $error }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                    <button type="button" @click="show = false" class="text-gray-300 hover:text-gray-500 dark:hover:text-gray-200 transition-colors shrink-0 mt-0.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="h-0.5 bg-red-200 dark:bg-red-900/60"></div>
+            </div>
+        @endif
+
+    </div>
+    {{-- /toasts --}}
+
+
+    <!-- System Status Widget -->
+    <div id="websocket-status" style="display: none;"></div> {{-- Connector for echo.js default behavior --}}
+
+    <!-- System Status Widget (Hidden/Legacy Hook) -->
+    <div id="websocket-status" style="display: none;"></div>
+    <script>
+        // Minimal hook to prevent errors if anything relies on it, though sidebar polls directly.
+        window.updateSystemStatus = function (s) { /* No-op or log */ };
+
+        /**
+         * Shared Filterable List Mixin
+         * Provides URL-persisted filtering, search, and count functionality
+         * 
+         * Usage in Alpine components:
+         * Alpine.data('myComponent', (items) => ({
+         *     ...window.filterableMixin(items, 'my-update-event'),
+         *     // Your custom properties
+         *     myCustomProp: 'value',
+         *     
+         *     init() {
+         *         this.initFilterable();
+         *         // Your custom init code
+         *     }
+         * }))
+         */
+        window.filterableMixin = function (items, statusEventName = 'device-updated') {
+            return {
+                // Filter state (initialized from URL)
+                search: new URLSearchParams(window.location.search).get('search') || '',
+                statusFilter: new URLSearchParams(window.location.search).get('status') || 'all',
+                customerFilter: new URLSearchParams(window.location.search).get('customer') || 'all',
+
+                // Data
+                items: items,
+                itemStatuses: {},
+
+                /**
+                 * Initialize filterable functionality
+                 * Call this from your component's init() method
+                 */
+                initFilterable() {
+                    // Watch for filter changes and sync to URL
+                    this.$watch('search', (val) => this.updateUrl('search', val));
+                    this.$watch('statusFilter', (val) => this.updateUrl('status', val));
+                    this.$watch('customerFilter', (val) => this.updateUrl('customer', val));
+
+                    // Listen for status updates to track online/offline state
+                    window.addEventListener(statusEventName, (e) => {
+                        if (e.detail && e.detail.id) {
+                            this.itemStatuses[e.detail.id] = { online: e.detail.online };
+                        }
+                    });
+                },
+
+                /**
+                 * Update URL query parameters
+                 */
+                updateUrl(key, value) {
+                    const url = new URL(window.location);
+                    if (value && value !== 'all') {
+                        url.searchParams.set(key, value);
+                    } else {
+                        url.searchParams.delete(key);
+                    }
+                    window.history.replaceState(null, '', url);
+                },
+
+                /**
+                 * Get count of items matching current filters
+                 */
+                filteredCount() {
+                    return this.items.filter(item => {
+                        // Search filter
+                        const q = this.search.toLowerCase();
+                        const matchesSearch = !q || (item.searchData && item.searchData.includes(q)) || (item.staticInfo && item.staticInfo.includes(q));
+
+                        // Status filter
+                        let matchesStatus = true;
+                        if (this.statusFilter !== 'all') {
+                            const status = this.itemStatuses[item.id];
+                            const isOnline = status ? status.online : (item.online || false);
+                            if (this.statusFilter === 'online' && !isOnline) matchesStatus = false;
+                            if (this.statusFilter === 'offline' && isOnline) matchesStatus = false;
+                        }
+
+                        // Customer/Company filter
+                        let matchesCustomer = true;
+                        if (this.customerFilter !== 'all') {
+                            if (item.companyName !== this.customerFilter) matchesCustomer = false;
+                        }
+
+                        return matchesSearch && matchesStatus && matchesCustomer;
+                    }).length;
+                }
+            };
+        };
+
+        /**
+         * Column Selector Mixin
+         * Provides show/hide column state for any table, persisted to localStorage.
+         *
+         * Usage:
+         *   x-data="{
+         *     ...window.columnSelectorMixin('my_table_v1', [
+         *       { key: 'host',    label: 'Host',    default: true  },
+         *       { key: 'address', label: 'Address', default: false },
+         *     ]),
+         *     // your other props...
+         *     init() { this.initColumns(); }
+         *   }"
+         *
+         * Then use x-show="cols.host" on <th> and <td> pairs.
+         * Drop the <column-selector> component (column-selector.blade.php) in the toolbar.
+         */
+        window.columnSelectorMixin = function (storageKey, columnDefs) {
+            const stored = JSON.parse(localStorage.getItem(storageKey) || 'null') || {};
+            const cols = {};
+            for (const def of columnDefs) {
+                cols[def.key] = Object.prototype.hasOwnProperty.call(stored, def.key)
+                    ? stored[def.key]
+                    : (def.default !== false);
+            }
+
+            const countHidden = (c) => columnDefs.filter(d => !d.always && !c[d.key]).length;
+
+            return {
+                _columnDefs: columnDefs,
+                cols,
+                colSelectorOpen: false,
+                hiddenColCount: countHidden(cols), // plain reactive property — safe to spread
+
+                initColumns() {
+                    // Re-compute hiddenColCount and persist whenever cols changes.
+                    // We replace the whole cols object in toggleCol/resetColumns so
+                    // a shallow $watch is sufficient.
+                    this.$watch('cols', (val) => {
+                        this.hiddenColCount = countHidden(val);
+                        localStorage.setItem(storageKey, JSON.stringify(val));
+                    });
+                },
+
+                toggleCol(key) {
+                    const def = this._columnDefs.find(d => d.key === key);
+                    if (def?.always) return;
+                    this.cols = { ...this.cols, [key]: !this.cols[key] };
+                },
+
+                resetColumns() {
+                    const defaults = {};
+                    for (const def of this._columnDefs) defaults[def.key] = def.default !== false;
+                    this.cols = defaults;
+                    localStorage.removeItem(storageKey);
+                },
+            };
+        };
+    </script>
+    <!-- PWA INSTALL BUTTON -->
+    <div id="pwa-install-container" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2"
+        style="display: none;">
+        <button id="pwa-install-btn"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-full shadow-lg flex items-center space-x-2 transition-all transform hover:scale-105">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24"
+                stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            <span>Install App</span>
+        </button>
+        <button id="pwa-dismiss-btn"
+            class="bg-gray-800/80 hover:bg-gray-700 text-gray-200 p-2 rounded-full shadow-lg transition-all backdrop-blur-sm"
+            title="Dismiss temporarily">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24"
+                stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+        </button>
+    </div>
+
+    <script>
+        (function () {
+            // ... existing PWA code ...
+            window.deferredPrompt = null;
+            const installContainer = document.getElementById('pwa-install-container');
+            const installBtn = document.getElementById('pwa-install-btn');
+            const dismissBtn = document.getElementById('pwa-dismiss-btn');
+
+            // Global install function for sidebar/other components
+            window.pwaInstall = function () {
+                if (window.deferredPrompt) {
+                    window.deferredPrompt.prompt();
+                    window.deferredPrompt.userChoice.then((choiceResult) => {
+                        window.deferredPrompt = null;
+                        if (choiceResult.outcome === 'accepted') {
+                            console.log('PWA: User accepted the A2HS prompt');
+                            installContainer.style.display = 'none';
+                        } else {
+                            console.log('PWA: User dismissed the A2HS prompt');
+                        }
+                    });
+                } else {
+                    console.log('PWA: No deferred prompt available');
+                }
+            };
+
+            window.addEventListener('beforeinstallprompt', (e) => {
+                // Prevent Chrome 67 and earlier from automatically showing the prompt
+                e.preventDefault();
+                // Stash the event so it can be triggered later.
+                window.deferredPrompt = e;
+
+                // Dispatch event for other components (like sidebar) to know install is available
+                window.dispatchEvent(new CustomEvent('pwa-ready'));
+
+                // Show floating button only if not dismissed in this session
+                if (!sessionStorage.getItem('pwa-dismissed')) {
+                    installContainer.style.display = 'flex'; // Changed to flex for button alignment
+                    console.log('PWA: Install event captured, button shown');
+                } else {
+                    console.log('PWA: Install event captured, but button dismissed for session');
+                }
+            });
+
+            installBtn.addEventListener('click', (e) => {
+                window.pwaInstall();
+            });
+
+            dismissBtn.addEventListener('click', (e) => {
+                installContainer.style.display = 'none';
+                sessionStorage.setItem('pwa-dismissed', 'true');
+                console.log('PWA: Floating button dismissed for session');
+            });
+
+            window.addEventListener('appinstalled', () => {
+                window.deferredPrompt = null;
+                installContainer.style.display = 'none';
+                console.log('PWA: App installed');
+                // Optional: dispatch event to update sidebar state
+                window.dispatchEvent(new CustomEvent('pwa-installed'));
+            });
+        })();
+    </script>
+
+
+    <script>
+        function systemUpdateListener() {
+            return {
+                pollInterval: null,
+                updateComplete: false,
+                updateAvailable: false,
+                isInstalling: false,
+                dismissedSession: false,
+                currentVersion: '',
+                availableVersion: '',
+                isPrerelease: false,
+                allowPrereleases: false,
+
+                init() {
+                    // Check session storage first
+                    if (sessionStorage.getItem('pfcentral_update_remind_later')) {
+                        this.dismissedSession = true;
+                    }
+
+                    // Check for active installation first
+                    if (localStorage.getItem('pfcentral_update_active')) {
+                        this.isInstalling = true;
+                        this.startPolling(); // Poll for installation status
+                    } else {
+                        this.checkAvailability(); // Check for available updates
+                    }
+
+                    // Listen for reload from other components
+                    window.addEventListener('system-update-reload', () => {
+                        this.reloadPage();
+                    });
+                    window.addEventListener('system-update-started', () => {
+                        this.isInstalling = true;
+                        this.updateAvailable = false;
+                        this.startPolling();
+                    });
+
+                    // Listen for install confirmation from Settings Page
+                    window.addEventListener('system-update-install-confirmed', () => {
+                        this.performUpdate();
+                    });
+                },
+
+                // ... dismissUpdate ...
+
+                async startUpdate() {
+                    const result = await Swal.fire({
+                        title: 'Install Update?',
+                        text: "The system will be unavailable for a few minutes.",
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonColor: '#3085d6',
+                        cancelButtonColor: '#d33',
+                        confirmButtonText: 'Yes, install it!'
+                    });
+
+                    if (result.isConfirmed) {
+                        this.performUpdate();
+                    }
+                },
+
+                performUpdate() {
+                    this.isInstalling = true;
+                    this.updateAvailable = false;
+
+                    // Dispatch initiating event so Settings UI shows "Queueing..." immediately
+                    window.dispatchEvent(new CustomEvent('system-update-initiating'));
+
+                    fetch('{{ route("system.updates.install") }}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                        }
+                    })
+                        .then(response => {
+                            if (!response.ok) throw new Error('Update start failed');
+                            return response.json().catch(() => ({}));
+                        })
+                        .then(data => {
+                            console.log('Update started', data);
+                            localStorage.setItem('pfcentral_update_active', 'true');
+                            window.dispatchEvent(new CustomEvent('system-update-started'));
+                            this.startPolling();
+                        })
+                        .catch(error => {
+                            console.error('Error starting update:', error);
+                            this.isInstalling = false;
+                            this.updateAvailable = true;
+
+                            // Dispatch failure event
+                            window.dispatchEvent(new CustomEvent('system-update-failed', {
+                                detail: { message: 'Could not start the update process.' }
+                            }));
+
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Update Failed',
+                                text: 'Could not start the update process. Please check logs.',
+                                toast: true,
+                                position: 'top-end'
+                            });
+                        });
+                },
+
+                dismissUpdate() {
+                    Swal.fire({
+                        title: 'Dismiss This Update?',
+                        text: "You can hide this notification for now, or skip this specific version entirely.",
+                        icon: 'question',
+                        showCancelButton: true,
+                        showDenyButton: true,
+                        confirmButtonText: 'Skip This Version',
+                        denyButtonText: 'Remind Me Later',
+                        cancelButtonText: 'Cancel',
+                        confirmButtonColor: '#3085d6',
+                        denyButtonColor: '#6c757d',
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+                            fetch('{{ route("system.updates.dismiss") }}', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                                },
+                                body: JSON.stringify({ version: this.availableVersion })
+                            })
+                                .then(response => {
+                                    if (response.ok) {
+                                        this.updateAvailable = false;
+                                        Swal.fire({
+                                            title: 'Dismissed',
+                                            text: 'You will not be notified about this version again.',
+                                            icon: 'success',
+                                            timer: 2000,
+                                            showConfirmButton: false
+                                        });
+                                    } else {
+                                        throw new Error('Failed to dismiss');
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Error dismissing update:', error);
+                                    Swal.fire('Error', 'Failed to dismiss update.', 'error');
+                                });
+                        } else if (result.isDenied) {
+                            // Remind Me Later: Set session storage
+                            sessionStorage.setItem('pfcentral_update_remind_later', 'true');
+                            this.dismissedSession = true;
+
+                            Swal.fire({
+                                icon: 'info',
+                                title: 'Reminder Set',
+                                text: 'We will remind you again when you next login.',
+                                toast: true,
+                                position: 'top-end',
+                                timer: 3000,
+                                showConfirmButton: false
+                            });
+                        }
+                    });
+                },
+
+                async startUpdate() {
+                    const result = await Swal.fire({
+                        title: 'Install Update?',
+                        text: "The system will be unavailable for a few minutes.",
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonColor: '#3085d6',
+                        cancelButtonColor: '#d33',
+                        confirmButtonText: 'Yes, install it!'
+                    });
+
+                    if (result.isConfirmed) {
+                        this.performUpdate();
+                    }
+                },
+
+                performUpdate() {
+                    this.isInstalling = true;
+                    this.updateAvailable = false;
+                    window.dispatchEvent(new CustomEvent('system-update-initiating'));
+
+                    fetch('{{ route("system.updates.install") }}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                        }
+                    })
+                        .then(response => {
+                            // We expect a redirect or json. For now, just assume it started if 200/302.
+                            // Ideally the backend returns JSON.
+                            // If it redirects, fetch might follow it.
+                            // Let's assume the backend starts the process.
+                            if (!response.ok) throw new Error('Update start failed');
+                            return response.json().catch(() => ({})); // Handle if no json
+                        })
+                        .then(data => {
+                            console.log('Update started', data);
+                            localStorage.setItem('pfcentral_update_active', 'true');
+                            window.dispatchEvent(new CustomEvent('system-update-started'));
+                            this.startPolling();
+                        })
+                        .catch(error => {
+                            console.error('Error starting update:', error);
+                            this.isInstalling = false;
+                            this.updateAvailable = true;
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Update Failed',
+                                text: 'Could not start the update process. Please check logs.',
+                                toast: true,
+                                position: 'top-end'
+                            });
+                        });
+                },
+
+                checkAvailability() {
+                    fetch('{{ route("system.updates.check-global") }}')
+                        .then(response => response.json())
+                        .then(data => {
+                            this.currentVersion   = (data.current_version || 'unknown').replace(/^v/, '');
+                            this.availableVersion = (data.version || 'unknown').replace(/^v/, '');
+                            this.isPrerelease     = !!data.is_prerelease;
+                            this.allowPrereleases = !!data.allow_prereleases;
+                            if (data.update_available && !this.isInstalling) {
+                                this.updateAvailable = true;
+                                this.updateComplete = false;
+                            } else if (!this.isInstalling) {
+                                this.updateAvailable = false;
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error checking update availability:', error);
+                            this.updateAvailable = false;
+                        });
+                },
+
+                startPolling() {
+                    if (this.pollInterval) clearInterval(this.pollInterval);
+                    this.pollStatus(); // Immediate check
+                    this.pollInterval = setInterval(() => {
+                        this.pollStatus();
+                    }, 2000); // Poll every 2s
+                },
+
+                async pollStatus() {
+                    try {
+                        const response = await fetch('{{ route("system.updates.status") }}');
+                        if (!response.ok) return;
+
+                        const data = await response.json();
+
+                        // Dispatch status for other components to sync
+                        window.dispatchEvent(new CustomEvent('system-update-status', { detail: data }));
+
+                        if (data.status === 'complete') {
+                            this.updateComplete = true;
+                            this.isInstalling = false;
+                            this.updateAvailable = false;
+                            clearInterval(this.pollInterval);
+                            // Don't clear localStorage here; let reloadPage handle it
+                        } else if (data.status === 'failed' || data.status === 'idle') {
+                            clearInterval(this.pollInterval);
+                            localStorage.removeItem('pfcentral_update_active');
+                            this.isInstalling = false;
+                            this.updateComplete = false;
+
+                            // Only re-check availability if it was a failure, or if we were installing
+                            if (data.status === 'failed') {
+                                Swal.fire({
+                                    icon: 'error',
+                                    title: 'Update Failed',
+                                    text: data.last_error || 'Unknown error occurred.',
+                                    toast: true,
+                                    position: 'top-end'
+                                });
+                                this.checkAvailability();
+                            }
+                        } else {
+                            // Still installing/downloading
+                            this.isInstalling = true;
+                            this.updateAvailable = false;
+                            this.updateComplete = false;
+                        }
+                    } catch (e) {
+                        console.error('Global poll error', e);
+                    }
+                },
+
+                reloadPage() {
+                    localStorage.removeItem('pfcentral_update_active');
+                    window.location.reload();
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>

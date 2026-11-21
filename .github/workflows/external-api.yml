@@ -1,0 +1,58 @@
+name: External inventory and status API
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  api-tests:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: pfcentral_api_ci
+          MYSQL_ROOT_PASSWORD: ci-test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_ENV: testing
+      APP_DEBUG: false
+      APP_URL: https://localhost
+      APP_KEY: base64:eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: pfcentral_api_ci
+      DB_USERNAME: root
+      DB_PASSWORD: ci-test-password
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      BROADCAST_CONNECTION: 'null'
+      MAIL_MAILER: array
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: shivammathur/setup-php@b2f833f7d1c070621af195c088d275c4cd60ef8f # 2.9.0
+        with:
+          php-version: '8.4'
+          extensions: mbstring, intl, pdo_mysql, bcmath
+          tools: composer:v2
+          coverage: none
+      - name: Validate and install locked dependencies
+        run: |
+          composer validate --no-check-publish
+          composer install --no-scripts --no-plugins --no-interaction --prefer-dist --no-progress
+          php artisan package:discover --no-ansi
+      - name: Run isolated API tests
+        run: vendor/bin/phpunit tests/Feature/ExternalIntegrationApiTest.php tests/Feature/ExternalFirewallStatusApiTest.php

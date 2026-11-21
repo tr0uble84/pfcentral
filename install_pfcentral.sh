@@ -1,0 +1,1224 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+LOG_FILE="/root/pfcentral_install_allinone.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+trap 'echo; echo "[X] FAILED at line $LINENO. See '"$LOG_FILE"'"; exit 1' ERR
+
+log(){ echo -e "\n[+] $*\n"; }
+die(){ echo -e "\n[X] $*\n"; exit 1; }
+
+[[ "${EUID}" -eq 0 ]] || die "Run as root: sudo bash $0"
+
+# This installer contains interactive prompts. Do not run through curl | bash,
+# CI, or any wrapper that does not provide a real terminal.
+[[ -r /dev/tty && -w /dev/tty ]] || die "This installer requires a real interactive terminal. Download it first, then run: sudo bash install_pfcentral.sh"
+
+# ---------------- CONFIG (override via env) ----------------
+# Capture an explicit PHP_VER before the original non-Ubuntu default is applied.
+# Ubuntu defaults to auto; PHP_VER=8.4 / PHP_VER=8.5 still selects that series.
+UBUNTU_PHP_REQUEST="${PHP_VER:-auto}"
+PHP_VER="${PHP_VER:-8.4}"
+NODE_MAJOR="${NODE_MAJOR:-20}"
+
+REPO_URL="${REPO_URL:-https://github.com/tr0uble84/pfcentral-Jay.git}"
+INSTALL_DIR="${INSTALL_DIR:-/var/www/pfcentral}"
+WEB_USER="${WEB_USER:-www-data}"
+WEB_GROUP="${WEB_GROUP:-www-data}"
+
+DB_NAME="${DB_NAME:-pfcentral}"
+DB_HOST="${DB_HOST:-127.0.0.1}"
+DB_PORT="${DB_PORT:-3306}"
+
+# If you export these, script will not prompt:
+DB_USER="${DB_USER:-pfcentral}"
+DB_PASS="${DB_PASS:-}"
+# -----------------------------------------------------------
+
+OS_FAMILY=""
+DB_SERVICE_NAME="mysql"
+RUNTIME_WEB_USER=""
+RUNTIME_WEB_GROUP=""
+WEB_HOME=""
+PHP_SERVICE=""
+
+os_detect() {
+  log "Detecting Operating System"
+  if [[ -f /etc/os-release ]]; then
+    . /etc/os-release
+    local id_like="${ID_LIKE:-}"
+    local id="${ID:-}"
+
+    if [[ "$id" == "debian" || "$id" == "ubuntu" || "$id_like" == *"debian"* || "$id_like" == *"ubuntu"* ]]; then
+      OS_FAMILY="debian"
+      DB_SERVICE_NAME="mysql"
+      PHP_SERVICE="php${PHP_VER}-fpm"
+    elif [[ "$id" == "fedora" || "$id" == "rhel" || "$id" == "centos" || "$id_like" == *"fedora"* || "$id_like" == *"rhel"* || "$id_like" == *"centos"* ]]; then
+      OS_FAMILY="redhat"
+      DB_SERVICE_NAME="mariadb"
+      PHP_SERVICE="php-fpm"
+      if [[ "${WEB_USER}" == "www-data" ]]; then WEB_USER="nginx"; fi
+      if [[ "${WEB_GROUP}" == "www-data" ]]; then WEB_GROUP="nginx"; fi
+    elif [[ "$id" == "arch" || "$id_like" == *"arch"* ]]; then
+      OS_FAMILY="arch"
+      DB_SERVICE_NAME="mariadb"
+      PHP_SERVICE="php-fpm"
+      if [[ "${WEB_USER}" == "www-data" ]]; then WEB_USER="http"; fi
+      if [[ "${WEB_GROUP}" == "www-data" ]]; then WEB_GROUP="http"; fi
+    elif [[ "$id" == "suse" || "$id" == opensuse* || "$id_like" == *"suse"* ]]; then
+      OS_FAMILY="suse"
+      DB_SERVICE_NAME="mariadb"
+      PHP_SERVICE="php8-fpm"
+      if [[ "${WEB_USER}" == "www-data" ]]; then WEB_USER="nginx"; fi
+      if [[ "${WEB_GROUP}" == "www-data" ]]; then WEB_GROUP="nginx"; fi
+    else
+      log "Warning: Unknown OS $id or $id_like, defaulting to debian strategy"
+      OS_FAMILY="debian"
+      DB_SERVICE_NAME="mysql"
+      PHP_SERVICE="php${PHP_VER}-fpm"
+    fi
+  else
+    die "Cannot detect OS: /etc/os-release missing"
+  fi
+  log "Detected OS Family: $OS_FAMILY"
+}
+
+wait_for_pkg_locks() {
+  if [[ "$OS_FAMILY" == "debian" ]]; then
+    log "Waiting for package manager locks to clear"
+    local i=0
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+       || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 \
+       || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+      i=$((i+1))
+      [[ $i -le 300 ]] || die "apt locks did not clear after ~10 minutes"
+      sleep 2
+    done
+  fi
+}
+
+pkg_install() {
+  wait_for_pkg_locks
+  case "$OS_FAMILY" in
+    debian)
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
+      ;;
+    redhat)
+      dnf install -y "$@"
+      ;;
+    arch)
+      pacman -S --noconfirm --needed "$@"
+      ;;
+    suse)
+      zypper install -y --no-recommends "$@"
+      ;;
+  esac
+}
+
+# Ubuntu additions: the other distribution paths below are unchanged.
+# Auto mode follows the newest stable PHP 8.x available from APT, not beta/RC
+# builds or a future major version. The production lock file is checked later;
+# package availability alone is not a claim of application compatibility.
+ubuntu_php_candidate() {
+  LC_ALL=C apt-cache policy "$1" \
+    | awk '/^[[:space:]]*Candidate:/ {print $2}'
+}
+
+ubuntu_php_packages_usable() {
+  local series="$1" package candidate upstream simulation
+  local -a packages=()
+  local suffix
+
+  for suffix in cli fpm mysql mbstring xml curl zip gd bcmath intl redis; do
+    package="php${series}-${suffix}"
+    candidate="$(ubuntu_php_candidate "$package")" || return 1
+    if [[ -z "$candidate" || "$candidate" == "(none)" ]]; then
+      log "Ubuntu: skipping PHP ${series}; ${package} has no APT candidate"
+      return 1
+    fi
+
+    if [[ "$suffix" == "cli" || "$suffix" == "fpm" ]]; then
+      # Match a stable upstream x.y.z, optionally with a Debian epoch/revision.
+      # Examples rejected here: 8.6.0beta1, 8.6.0~rc1, 8.6.0+git20260901.
+      if [[ ! "$candidate" =~ ^([0-9]+:)?([0-9]+\.[0-9]+\.[0-9]+)([-+].*)?$ ]] \
+          || [[ "${candidate,,}" =~ (alpha|beta|rc[0-9]*|dev|git|snapshot) ]]; then
+        log "Ubuntu: skipping non-stable ${package} candidate ${candidate}"
+        return 1
+      fi
+      upstream="${candidate#*:}"
+      upstream="${upstream%%[-+]*}"
+      # The dependency set reported during this install requires >= 8.4.1.
+      # This is a lower bound, not a pin to the PHP 8.4 series.
+      if ! dpkg --compare-versions "$upstream" ge 8.4.1; then
+        log "Ubuntu: skipping ${package} ${upstream}; PHP >= 8.4.1 is required"
+        return 1
+      fi
+    fi
+    packages+=("$package")
+  done
+
+  # Check package dependencies without changing the machine. Redis must be
+  # available for this series too; do not mix a generic Redis PHP metapackage
+  # from another PHP series into this selection.
+  if ! simulation="$(LC_ALL=C apt-get --simulate --no-install-recommends \
+      install "${packages[@]}" 2>&1)"; then
+    log "Ubuntu: PHP ${series} packages cannot currently be installed"
+    printf '%s\n' "$simulation"
+    return 1
+  fi
+  return 0
+}
+
+prepare_ubuntu_php() {
+  [[ "${ID:-}" == "ubuntu" ]] || return 0
+  local requested="$UBUNTU_PHP_REQUEST" attempt listing versions series
+  local -a candidates=()
+
+  [[ "$requested" == "auto" || "$requested" =~ ^[0-9]+\.[0-9]+$ ]] \
+    || die "On Ubuntu, PHP_VER must be auto or a major.minor series such as 8.4 or 8.5"
+
+  # Try the currently configured repositories first. Only add the PPA when
+  # they cannot provide the requested/eligible runtime and its extensions.
+  for attempt in 0 1; do
+    if [[ "$requested" == "auto" ]]; then
+      listing="$(LC_ALL=C apt-cache pkgnames)" \
+        || die "Could not read Ubuntu's APT package index"
+      versions="$(printf '%s\n' "$listing" \
+        | sed -nE 's/^php(8\.[0-9]+)-cli$/\1/p' | sort -uVr)"
+      mapfile -t candidates <<< "$versions"
+    else
+      candidates=("$requested")
+    fi
+
+    for series in "${candidates[@]}"; do
+      [[ -n "$series" ]] || continue
+      if ubuntu_php_packages_usable "$series"; then
+        PHP_VER="$series"
+        PHP_SERVICE="php${PHP_VER}-fpm"
+        log "Ubuntu selected PHP ${PHP_VER}; FPM service: ${PHP_SERVICE}"
+        return 0
+      fi
+    done
+
+    if [[ "$attempt" == "0" ]]; then
+      log "Ubuntu: enabling third-party Ondrej PHP PPA for the required PHP packages"
+      pkg_install software-properties-common
+      wait_for_pkg_locks
+      add-apt-repository -y ppa:ondrej/php
+      wait_for_pkg_locks
+      apt-get update
+    fi
+  done
+  die "Ubuntu: no usable stable PHP runtime/extensions were found. Review APT errors above; requested PHP_VER=${requested}."
+}
+
+select_ubuntu_php_cli() {
+  [[ "${ID:-}" == "ubuntu" ]] || return 0
+  [[ -x "/usr/bin/php${PHP_VER}" ]] \
+    || die "Ubuntu PHP CLI is missing: /usr/bin/php${PHP_VER}"
+  update-alternatives --set php "/usr/bin/php${PHP_VER}"
+  hash -r
+  local actual_series
+  actual_series="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')"
+  [[ "$actual_series" == "$PHP_VER" ]] \
+    || die "Another php binary is overriding /usr/bin/php in PATH. Expected ${PHP_VER}; got ${actual_series}. Inspect: command -v php"
+  log "Ubuntu CLI: PHP $(php -r 'echo PHP_VERSION;'); FPM: ${PHP_SERVICE}"
+}
+
+install_composer() {
+  log "Installing Composer"
+  if command -v composer >/dev/null 2>&1; then
+    composer --version || true
+    return 0
+  fi
+  php -r "copy('https://getcomposer.org/installer','/tmp/composer-setup.php');"
+  php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer
+  rm -f /tmp/composer-setup.php
+  composer --version
+}
+
+install_node() {
+  log "Installing Node.js ${NODE_MAJOR}.x"
+  if command -v node >/dev/null 2>&1 && node -v | grep -qE "^v${NODE_MAJOR}\."; then
+    node -v
+    npm -v || true
+    return 0
+  fi
+
+  if [[ "$OS_FAMILY" == "debian" ]]; then
+    curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash -
+    pkg_install nodejs
+  elif [[ "$OS_FAMILY" == "redhat" ]]; then
+    curl -fsSL "https://rpm.nodesource.com/setup_${NODE_MAJOR}.x" | bash -
+    pkg_install nodejs
+  else
+    pkg_install nodejs npm
+  fi
+
+  node -v || true
+  npm -v || true
+}
+
+wait_for_mysql() {
+  log "Waiting for MySQL/MariaDB to be ready"
+  systemctl enable --now "$DB_SERVICE_NAME" || true
+  local i=0
+  until mysqladmin ping --silent >/dev/null 2>&1; do
+    i=$((i+1))
+    if [[ $i -gt 120 ]]; then
+      systemctl status "$DB_SERVICE_NAME" --no-pager || true
+      journalctl -u "$DB_SERVICE_NAME" -n 200 --no-pager || true
+      die "MySQL/MariaDB startup failed"
+    fi
+    sleep 2
+  done
+}
+
+create_database() {
+  log "Creating MySQL database: ${DB_NAME}"
+  sudo mysql --protocol=socket -e \
+    "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+}
+
+prompt_db_creds_once() {
+  echo
+  echo "============================================================"
+  echo "DATABASE SETUP"
+  echo "This script will create/update a MySQL user and grant access."
+  echo "Host: ${DB_HOST}  Port: ${DB_PORT}  DB: ${DB_NAME}"
+  echo "============================================================"
+  echo
+
+  read -rp "DB Username [${DB_USER}]: " _u || true
+  DB_USER="${_u:-$DB_USER}"
+  [[ -n "$DB_USER" ]] || die "DB Username cannot be empty"
+
+  if [[ -n "${DB_PASS}" ]]; then
+    echo "DB password provided via environment. Skipping password prompt."
+    return 0
+  fi
+
+  local p1 p2
+  while true; do
+    read -r -s -p "Enter password to set for ${DB_USER}@localhost: " p1
+    echo
+    [[ -n "${p1}" ]] || { echo "Password cannot be empty. Try again."; continue; }
+    read -r -s -p "Confirm password: " p2
+    echo
+    [[ "${p1}" == "${p2}" ]] || { echo "Passwords do not match. Try again."; p1=""; p2=""; continue; }
+    DB_PASS="${p1}"
+    unset p1 p2
+    break
+  done
+}
+
+setup_mysql_app_user() {
+  log "Creating/updating MySQL user '${DB_USER}'@'localhost' + grants on '${DB_NAME}'"
+
+  sudo mysql --protocol=socket <<SQL
+CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
+ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
+GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+}
+
+db_preflight_test() {
+  log "Testing MySQL credentials (TCP preflight)"
+  MYSQL_PWD="$DB_PASS" mysql --protocol=tcp -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -e "SELECT 1;" "$DB_NAME" >/dev/null \
+    || die "MySQL preflight failed. Wrong creds OR user lacks access to DB '$DB_NAME'."
+}
+
+detect_php_fpm_sock() {
+  local preferred="/var/run/php/php${PHP_VER}-fpm.sock"
+  [[ -S "$preferred" ]] && { echo "$preferred"; return 0; }
+
+  local found
+  found="$(ls -1 /var/run/php/php*-fpm.sock /run/php-fpm/www.sock /run/php-fpm/php-fpm.sock /run/php-fpm.sock /var/run/php-fpm.sock 2>/dev/null | head -n 1 || true)"
+  [[ -n "$found" ]] || die "No PHP-FPM socket found in standard directories"
+  echo "$found"
+}
+
+set_env_kv() {
+  local file="$1" key="$2" val="$3"
+  if grep -qE "^${key}=" "$file"; then
+    sed -i "s#^${key}=.*#${key}=${val}#g" "$file"
+  else
+    echo "${key}=${val}" >> "$file"
+  fi
+}
+
+configure_arch_php() {
+  if [[ "$OS_FAMILY" == "arch" ]]; then
+    log "Configuring Arch Linux PHP extensions"
+    local ini="/etc/php/php.ini"
+    if [[ -f "$ini" ]]; then
+      local exts=(pdo_mysql bcmath curl gd intl zip iconv mysqli sockets sqlite3)
+      for ext in "${exts[@]}"; do
+        sed -i "s/^;extension=${ext}/extension=${ext}/" "$ini" || true
+        sed -i "s/^; extension=${ext}/extension=${ext}/" "$ini" || true
+      done
+    fi
+  fi
+}
+
+install_php_redis_extensions() {
+  log "Installing PHP Redis extensions"
+  case "$OS_FAMILY" in
+    debian)
+      if ! pkg_install "php${PHP_VER}-redis"; then
+        pkg_install php-redis
+      fi
+      ;;
+    redhat)
+      pkg_install php-pecl-igbinary php-pecl-redis || pkg_install php-igbinary php-pecl-redis || die "Failed to install php Redis packages on Red Hat/Fedora"
+      ;;
+    arch)
+      pkg_install php-igbinary php-redis php-sodium
+      ;;
+    suse)
+      pkg_install php8-redis php8-igbinary || pkg_install php-redis php-igbinary || log "Warning: could not verify SUSE Redis PHP package names automatically"
+      ;;
+  esac
+}
+
+enable_php_redis_extensions() {
+  log "Ensuring PHP extensions igbinary + redis are enabled"
+  case "$OS_FAMILY" in
+    arch)
+      mkdir -p /etc/php/conf.d
+      if [[ -f /etc/php/conf.d/igbinary.ini ]]; then
+        sed -i 's/^;[[:space:]]*extension[[:space:]]*=[[:space:]]*igbinary.*/extension=igbinary.so/' /etc/php/conf.d/igbinary.ini || true
+      else
+        printf 'extension=igbinary.so\n' >/etc/php/conf.d/igbinary.ini
+      fi
+      if [[ -f /etc/php/conf.d/redis.ini ]]; then
+        sed -i 's/^;[[:space:]]*extension[[:space:]]*=[[:space:]]*redis.*/extension=redis/' /etc/php/conf.d/redis.ini || true
+      else
+        printf 'extension=redis.so\n' >/etc/php/conf.d/redis.ini
+      fi
+      rm -f /etc/php/conf.d/20-igbinary.ini /etc/php/conf.d/30-redis.ini 2>/dev/null || true
+      ;;
+    redhat)
+      mkdir -p /etc/php.d
+      if [[ -f /etc/php.d/40-igbinary.ini ]]; then
+        sed -i 's/^;[[:space:]]*extension[[:space:]]*=[[:space:]]*igbinary.*/extension=igbinary.so/' /etc/php.d/40-igbinary.ini || true
+      elif [[ -f /etc/php.d/igbinary.ini ]]; then
+        sed -i 's/^;[[:space:]]*extension[[:space:]]*=[[:space:]]*igbinary.*/extension=igbinary.so/' /etc/php.d/igbinary.ini || true
+      else
+        printf 'extension=igbinary.so
+' >/etc/php.d/40-igbinary.ini
+      fi
+      if [[ -f /etc/php.d/50-redis.ini ]]; then
+        sed -i 's/^;[[:space:]]*extension[[:space:]]*=[[:space:]]*redis.*/extension=redis.so/' /etc/php.d/50-redis.ini || true
+      elif [[ -f /etc/php.d/redis.ini ]]; then
+        sed -i 's/^;[[:space:]]*extension[[:space:]]*=[[:space:]]*redis.*/extension=redis.so/' /etc/php.d/redis.ini || true
+      else
+        printf 'extension=redis.so
+' >/etc/php.d/50-redis.ini
+      fi
+      ;;
+    *)
+      :
+      ;;
+  esac
+}
+
+verify_php_redis_extensions() {
+  log "Verifying PHP extensions igbinary + redis"
+  php -m | grep -qi '^redis$' || die "PHP redis extension is not loaded"
+  if php -m | grep -qi '^igbinary$'; then
+    :
+  else
+    log "Warning: igbinary is not loaded; continuing only if redis works without it"
+  fi
+  php --ri redis >/dev/null 2>&1 || die "PHP redis extension is installed but not functioning"
+}
+
+detect_runtime_web_user_group() {
+  local app_user=""
+  local app_group=""
+  local fpm_conf=""
+
+  for f in /etc/php-fpm.d/www.conf /etc/php*/php-fpm.d/www.conf; do
+    if [[ -f "$f" ]]; then
+      fpm_conf="$f"
+      break
+    fi
+  done
+
+  # Ubuntu keeps each PHP series in its own configuration directory.
+  if [[ "${ID:-}" == "ubuntu" && -f "/etc/php/${PHP_VER}/fpm/pool.d/www.conf" ]]; then
+    fpm_conf="/etc/php/${PHP_VER}/fpm/pool.d/www.conf"
+  fi
+
+  if [[ -n "$fpm_conf" ]]; then
+    app_user="$(awk -F= '/^[[:space:]]*user[[:space:]]*=/{gsub(/[[:space:]]+/,"",$2); print $2; exit}' "$fpm_conf" || true)"
+    app_group="$(awk -F= '/^[[:space:]]*group[[:space:]]*=/{gsub(/[[:space:]]+/,"",$2); print $2; exit}' "$fpm_conf" || true)"
+  fi
+
+  if [[ -z "$app_user" ]]; then
+    app_user="$(ps -eo user,comm | awk '$2=="php-fpm" && $1!="root"{print $1; exit}' || true)"
+  fi
+
+  if [[ -z "$app_group" && -n "$app_user" ]]; then
+    app_group="$(id -gn "$app_user" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$app_user" ]]; then
+    if id nginx >/dev/null 2>&1; then
+      app_user="nginx"
+    elif id apache >/dev/null 2>&1; then
+      app_user="apache"
+    elif id www-data >/dev/null 2>&1; then
+      app_user="www-data"
+    elif id http >/dev/null 2>&1; then
+      app_user="http"
+    else
+      die "Could not determine PHP-FPM runtime user"
+    fi
+  fi
+
+  if [[ -z "$app_group" ]]; then
+    app_group="$(id -gn "$app_user" 2>/dev/null || true)"
+  fi
+
+  [[ -n "$app_user" ]] || die "Could not determine runtime user"
+  [[ -n "$app_group" ]] || die "Could not determine runtime group"
+
+  RUNTIME_WEB_USER="$app_user"
+  RUNTIME_WEB_GROUP="$app_group"
+  WEB_HOME="$(getent passwd "$RUNTIME_WEB_USER" | cut -d: -f6 || true)"
+
+  if [[ -z "$WEB_HOME" ]]; then
+    case "$RUNTIME_WEB_USER" in
+      http) WEB_HOME="/srv/http" ;;
+      nginx) WEB_HOME="/var/lib/nginx" ;;
+      apache) WEB_HOME="/usr/share/httpd" ;;
+      www-data) WEB_HOME="/var/www" ;;
+      *) WEB_HOME="/tmp/${RUNTIME_WEB_USER}" ;;
+    esac
+  fi
+
+  log "Detected PHP-FPM runtime user/group: ${RUNTIME_WEB_USER}:${RUNTIME_WEB_GROUP}"
+  log "Detected runtime home: ${WEB_HOME}"
+}
+
+fix_arch_nginx_main_config() {
+  [[ "$OS_FAMILY" == "arch" ]] || return 0
+
+  log "Fixing Arch nginx main config to load conf.d and remove default welcome site"
+
+  cat >/etc/nginx/nginx.conf <<'EOF'
+#user http;
+worker_processes  1;
+
+#error_log  logs/error.log;
+#error_log  logs/error.log  notice;
+#error_log  logs/error.log  info;
+
+#pid        logs/nginx.pid;
+
+# Load all installed modules
+include modules.d/*.conf;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+
+    #log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+    #                  '$status $body_bytes_sent "$http_referer" '
+    #                  '"$http_user_agent" "$http_x_forwarded_for"';
+
+    #access_log  logs/access.log  main;
+
+    sendfile        on;
+    #tcp_nopush     on;
+
+    keepalive_timeout 65;
+
+    #gzip  on;
+
+    include /etc/nginx/conf.d/*.conf;
+}
+EOF
+}
+
+configure_nginx_site() {
+  log "Configuring Nginx"
+
+  local nginx_sites_avail="/etc/nginx/sites-available"
+  local nginx_sites_en="/etc/nginx/sites-enabled"
+
+  if [[ "$OS_FAMILY" == "redhat" || "$OS_FAMILY" == "arch" || "$OS_FAMILY" == "suse" ]]; then
+    nginx_sites_avail="/etc/nginx/conf.d"
+    nginx_sites_en="/etc/nginx/conf.d"
+  fi
+
+  mkdir -p "$nginx_sites_avail"
+  mkdir -p "$nginx_sites_en"
+
+  rm -f "${nginx_sites_en}/default" || true
+  rm -f "${nginx_sites_en}/default.conf" || true
+  rm -f /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/example_ssl.conf 2>/dev/null || true
+
+  if [[ "$OS_FAMILY" == "arch" ]]; then
+    fix_arch_nginx_main_config
+  fi
+
+  local php_sock
+  php_sock="$(detect_php_fpm_sock)"
+
+  cat >"${nginx_sites_avail}/pfcentral.conf" <<EOF
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    root ${INSTALL_DIR}/public;
+
+    index index.php index.html;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+
+    location /app {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "Upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /apps {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "Upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_pass unix:${php_sock};
+        fastcgi_param SCRIPT_FILENAME \$realpath_root\$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT \$realpath_root;
+    }
+
+    location ~ /\.(?!well-known).* { deny all; }
+}
+EOF
+
+  if [[ "$nginx_sites_avail" != "$nginx_sites_en" ]]; then
+    ln -sf "${nginx_sites_avail}/pfcentral.conf" "${nginx_sites_en}/pfcentral.conf" || true
+  fi
+
+  nginx -t || die "Nginx config test failed"
+  systemctl reload nginx || systemctl restart nginx || true
+}
+
+run_as_runtime_user() {
+  local cmd="$1"
+  sudo -u "${RUNTIME_WEB_USER}" -H env HOME="${WEB_HOME}" npm_config_cache="${WEB_HOME}/.npm" bash -lc "$cmd"
+}
+
+install_frontend_clean() {
+  log "Fixing npm cache ownership + ensuring clean frontend install"
+
+  mkdir -p "${WEB_HOME}/.npm"
+  chown -R "${RUNTIME_WEB_USER}:${RUNTIME_WEB_GROUP}" "${WEB_HOME}" || true
+  chown -R "${RUNTIME_WEB_USER}:${RUNTIME_WEB_GROUP}" "${WEB_HOME}/.npm" || true
+
+  rm -rf "${INSTALL_DIR}/node_modules" || true
+  chown -R "${RUNTIME_WEB_USER}:${RUNTIME_WEB_GROUP}" "${INSTALL_DIR}" || true
+
+  log "Installing frontend deps + building (as ${RUNTIME_WEB_USER}, HOME=${WEB_HOME})"
+  run_as_runtime_user "
+    set -Eeuo pipefail
+    cd '${INSTALL_DIR}'
+    npm cache clean --force || true
+    npm cache verify || true
+    if [[ -f package-lock.json ]]; then
+      npm ci
+    else
+      npm install
+    fi
+    npm run build
+  "
+}
+
+
+get_supervisor_main_conf() {
+  local f
+  for f in /etc/supervisor/supervisord.conf /etc/supervisord.conf; do
+    [[ -f "$f" ]] && { echo "$f"; return 0; }
+  done
+  return 1
+}
+
+detect_supervisor_layout() {
+  local main_conf=""
+  local include_pattern=""
+  local include_dir=""
+  local include_base=""
+  local include_glob=""
+  local ext="conf"
+
+  main_conf="$(get_supervisor_main_conf || true)"
+
+  if [[ -n "$main_conf" ]]; then
+    include_pattern="$(awk -F= '/^[[:space:]]*files[[:space:]]*=/{print $2}' "$main_conf" | tail -n1 | xargs || true)"
+  fi
+
+  if [[ -n "$include_pattern" ]]; then
+    include_base="$(dirname "$main_conf")"
+    if [[ "$include_pattern" = /* ]]; then
+      include_glob="$include_pattern"
+    else
+      include_glob="${include_base}/${include_pattern}"
+    fi
+
+    include_dir="$(dirname "$include_glob")"
+    if [[ "$include_glob" == *.ini ]]; then
+      ext="ini"
+    elif [[ "$include_glob" == *.conf ]]; then
+      ext="conf"
+    fi
+  fi
+
+  if [[ -z "$include_dir" ]]; then
+    if [[ -d /etc/supervisor/conf.d ]]; then
+      include_dir="/etc/supervisor/conf.d"
+      ext="conf"
+    elif [[ -d /etc/supervisord.d ]]; then
+      include_dir="/etc/supervisord.d"
+      ext="ini"
+    elif [[ -d /etc/supervisor.d ]]; then
+      include_dir="/etc/supervisor.d"
+      ext="ini"
+    else
+      include_dir="/etc/supervisor/conf.d"
+      ext="conf"
+    fi
+  fi
+
+  echo "$include_dir|$ext"
+}
+
+ensure_supervisor_service_running() {
+  local svc=""
+
+  # Ubuntu's package provides supervisor.service. Avoid a pipefail/grep -q
+  # false negative here; leave the original discovery for other OSes alone.
+  if [[ "${ID:-}" == "ubuntu" ]]; then
+    systemctl enable --now supervisor >&2 \
+      || { die "Could not start Ubuntu supervisor.service" >&2; }
+    printf '%s\n' supervisor
+    return 0
+  fi
+
+  if systemctl list-unit-files 2>/dev/null | awk '{print $1}' | grep -qx 'supervisor.service'; then
+    svc="supervisor"
+  elif systemctl list-unit-files 2>/dev/null | awk '{print $1}' | grep -qx 'supervisord.service'; then
+      svc="supervisord"
+  else
+    svc="supervisord"
+  fi
+
+  systemctl enable --now "$svc" || true
+  echo "$svc"
+}
+
+final_fix_permissions() {
+  log "Running embedded final permissions fix"
+
+  [[ -n "${RUNTIME_WEB_USER}" ]] || detect_runtime_web_user_group
+  [[ -n "${RUNTIME_WEB_GROUP}" ]] || detect_runtime_web_user_group
+
+  mkdir -p "${INSTALL_DIR}/storage/framework/cache" \
+           "${INSTALL_DIR}/storage/framework/sessions" \
+           "${INSTALL_DIR}/storage/framework/views" \
+           "${INSTALL_DIR}/bootstrap/cache" \
+           "${INSTALL_DIR}/public/build" \
+           "${INSTALL_DIR}/storage/logs"
+
+  chown -R "${RUNTIME_WEB_USER}:${RUNTIME_WEB_GROUP}" \
+    "${INSTALL_DIR}/storage" \
+    "${INSTALL_DIR}/bootstrap/cache" \
+    "${INSTALL_DIR}/public/build"
+
+  find "${INSTALL_DIR}/storage" -type d -exec chmod 2775 {} \;
+  find "${INSTALL_DIR}/storage" -type f -exec chmod 0664 {} \;
+
+  find "${INSTALL_DIR}/bootstrap/cache" -type d -exec chmod 2775 {} \;
+  find "${INSTALL_DIR}/bootstrap/cache" -type f -exec chmod 0664 {} \;
+
+  find "${INSTALL_DIR}/public/build" -type d -exec chmod 2775 {} \; 2>/dev/null || true
+  find "${INSTALL_DIR}/public/build" -type f -exec chmod 0664 {} \; 2>/dev/null || true
+
+  if command -v getenforce >/dev/null 2>&1; then
+    if [[ "$(getenforce || true)" != "Disabled" ]]; then
+      log "Applying SELinux contexts"
+      if ! command -v semanage >/dev/null 2>&1; then
+        if [[ "$OS_FAMILY" == "redhat" ]]; then
+          dnf install -y policycoreutils-python-utils || true
+        fi
+      fi
+
+      if command -v semanage >/dev/null 2>&1; then
+        semanage fcontext -a -t httpd_sys_rw_content_t "${INSTALL_DIR}/storage(/.*)?" 2>/dev/null || true
+        semanage fcontext -a -t httpd_sys_rw_content_t "${INSTALL_DIR}/bootstrap/cache(/.*)?" 2>/dev/null || true
+        semanage fcontext -a -t httpd_sys_rw_content_t "${INSTALL_DIR}/public/build(/.*)?" 2>/dev/null || true
+      fi
+
+      restorecon -Rv "${INSTALL_DIR}/storage" "${INSTALL_DIR}/bootstrap/cache" "${INSTALL_DIR}/public/build" 2>/dev/null || true
+      setsebool -P httpd_unified 1 2>/dev/null || true
+      setsebool -P httpd_can_network_connect 1 2>/dev/null || true
+    fi
+  fi
+
+  if [[ -f "${INSTALL_DIR}/artisan" ]]; then
+    run_as_runtime_user "
+      cd '${INSTALL_DIR}'
+      php artisan view:clear || true
+      php artisan cache:clear || true
+      php artisan config:clear || true
+      php artisan route:clear || true
+      php artisan storage:link || true
+    "
+  fi
+
+  systemctl restart "${PHP_SERVICE}" || true
+  systemctl restart nginx || true
+}
+
+provision_cron() {
+  log "Provisioning Laravel scheduler cron"
+
+  local cron_line="* * * * * ${RUNTIME_WEB_USER} php ${INSTALL_DIR}/artisan schedule:run >> /dev/null 2>&1"
+  local cron_file="/etc/cron.d/pfcentral"
+  local cron_dir="/etc/cron.d"
+
+  # Only create if missing (handles Arch clean installs)
+  if [[ ! -d "$cron_dir" ]]; then
+    mkdir -p "$cron_dir"
+    chmod 0755 "$cron_dir"
+  fi
+
+  # Idempotent: only write if the artisan schedule:run line is not already present.
+  if [[ -f "$cron_file" ]] && grep -qF "artisan schedule:run" "$cron_file"; then
+    log "Laravel scheduler cron already present — skipping"
+    return 0
+  fi
+
+  cat > "$cron_file" << EOF
+# PFCentral — Laravel task scheduler
+# Drives backend firewall status polling independently of browser activity.
+# Do not remove: without this, pfSense status checks only run when a browser has /firewalls open.
+${cron_line}
+EOF
+
+  chmod 0644 "$cron_file"
+  log "Cron installed: $cron_file"
+  log "Entry: ${cron_line}"
+}
+
+main() {
+  os_detect
+
+  log "Updating package manager"
+  if [[ "$OS_FAMILY" == "debian" ]]; then
+    wait_for_pkg_locks
+    apt-get update -y
+  elif [[ "$OS_FAMILY" == "redhat" ]]; then
+    dnf makecache
+  elif [[ "$OS_FAMILY" == "arch" ]]; then
+    pacman -Sy
+  elif [[ "$OS_FAMILY" == "suse" ]]; then
+    zypper refresh
+  fi
+
+  log "Installing base packages"
+  if [[ "$OS_FAMILY" == "debian" ]]; then
+    pkg_install ca-certificates curl gnupg git unzip lsb-release apt-transport-https
+  elif [[ "$OS_FAMILY" == "redhat" ]]; then
+    pkg_install ca-certificates curl gnupg2 git unzip
+  elif [[ "$OS_FAMILY" == "arch" ]]; then
+    pkg_install ca-certificates curl gnupg git unzip lsb-release wget
+  elif [[ "$OS_FAMILY" == "suse" ]]; then
+    pkg_install ca-certificates curl gnupg2 git unzip lsb-release
+  fi
+
+  log "Installing Nginx + Database Server + Supervisor + Redis"
+  if [[ "$OS_FAMILY" == "debian" ]]; then
+    pkg_install nginx mysql-server supervisor certbot python3-certbot-nginx python3-certbot-dns-cloudflare redis-server
+  elif [[ "$OS_FAMILY" == "redhat" ]]; then
+    pkg_install nginx mariadb-server supervisor certbot python3-certbot-nginx python3-certbot-dns-cloudflare redis
+  elif [[ "$OS_FAMILY" == "arch" ]]; then
+    pkg_install nginx mariadb supervisor certbot certbot-nginx certbot-dns-cloudflare redis cronie
+    if [[ ! -d "/var/lib/mysql/mysql" ]]; then
+      mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql || true
+    fi
+  elif [[ "$OS_FAMILY" == "suse" ]]; then
+    pkg_install nginx mariadb supervisor certbot python3-certbot-nginx python3-certbot-dns-cloudflare redis
+  fi
+
+  log "Enabling and starting Redis"
+  systemctl enable --now redis-server 2>/dev/null || systemctl enable --now redis 2>/dev/null || true
+
+  if [[ "${ID:-}" == "ubuntu" ]]; then
+    prepare_ubuntu_php
+  fi
+
+  log "Installing PHP + extensions"
+  if [[ "$OS_FAMILY" == "debian" ]]; then
+    pkg_install \
+      php${PHP_VER}-cli php${PHP_VER}-fpm \
+      php${PHP_VER}-mysql php${PHP_VER}-mbstring php${PHP_VER}-xml php${PHP_VER}-curl \
+      php${PHP_VER}-zip php${PHP_VER}-gd php${PHP_VER}-bcmath php${PHP_VER}-intl
+  elif [[ "$OS_FAMILY" == "redhat" ]]; then
+    pkg_install php-cli php-fpm php-mysqlnd php-mbstring php-xml php-curl php-zip php-gd php-bcmath php-intl || true
+  elif [[ "$OS_FAMILY" == "arch" ]]; then
+    pkg_install php php-fpm php-gd php-intl php-sqlite php-sodium
+    configure_arch_php
+  elif [[ "$OS_FAMILY" == "suse" ]]; then
+    pkg_install php8-cli php8-fpm php8-mysql php8-mbstring php8-curl php8-zip php8-gd php8-bcmath php8-intl || true
+  fi
+
+  if [[ "${ID:-}" == "ubuntu" ]]; then
+    select_ubuntu_php_cli
+    # Install the matching Redis extension explicitly; the original helper
+    # below then finds it installed rather than falling back to another series.
+    pkg_install "php${PHP_VER}-redis"
+    systemctl daemon-reload
+  fi
+
+  install_php_redis_extensions
+  enable_php_redis_extensions
+
+  install_composer
+  install_node
+
+  log "Enabling services"
+  systemctl enable --now nginx || true
+  systemctl enable --now "${PHP_SERVICE}" || true
+  if [[ "${ID:-}" == "ubuntu" ]]; then
+    # Start the selected packaged unit directly; do not infer its existence
+    # by piping systemctl list-unit-files into grep -q.
+    systemctl restart "${PHP_SERVICE}"
+    systemctl is-active --quiet "${PHP_SERVICE}" \
+      || die "Ubuntu PHP-FPM did not start: ${PHP_SERVICE}"
+  fi
+  verify_php_redis_extensions
+
+  detect_runtime_web_user_group
+
+  wait_for_mysql
+  create_database
+
+  prompt_db_creds_once
+  setup_mysql_app_user
+  db_preflight_test
+
+  log "Cloning repo to ${INSTALL_DIR}"
+  rm -rf "$INSTALL_DIR"
+  git clone "$REPO_URL" "$INSTALL_DIR"
+  chown -R "${WEB_USER}:${WEB_GROUP}" "$INSTALL_DIR" || log "Warning: initial chown failed, ignoring..."
+
+  cd "$INSTALL_DIR"
+  [[ -f artisan && -d public ]] || die "Invalid repo layout (expected artisan + public/)"
+
+  log "Ensuring .env exists"
+  if [[ ! -f .env ]]; then
+    cp .env.example .env
+    chown "${WEB_USER}:${WEB_GROUP}" .env || true
+  fi
+
+  log "Writing app + DB settings into .env"
+  sed -i '/^DB_DATABASE=database\/database\.sqlite$/d' .env
+  sed -i '/^DB_CONNECTION=sqlite$/d' .env
+
+  local public_ip=""
+  public_ip="$(curl -4 -fsS ifconfig.me 2>/dev/null || true)"
+
+  set_env_kv .env "APP_NAME" '"PFCentral"'
+  if [[ -n "$public_ip" ]]; then
+    set_env_kv .env "APP_URL" "http://${public_ip}"
+  fi
+  set_env_kv .env "APP_ENV" "production"
+  set_env_kv .env "APP_DEBUG" "false"
+
+  set_env_kv .env "DB_CONNECTION" "mysql"
+  set_env_kv .env "DB_HOST" "$DB_HOST"
+  set_env_kv .env "DB_PORT" "$DB_PORT"
+  set_env_kv .env "DB_DATABASE" "$DB_NAME"
+  set_env_kv .env "DB_USERNAME" "$DB_USER"
+  set_env_kv .env "DB_PASSWORD" "$DB_PASS"
+
+  log "Writing Reverb settings into .env"
+  local reverb_app_id="pfcentral"
+  local reverb_app_key="$(openssl rand -hex 16)"
+  local reverb_app_secret="$(openssl rand -hex 16)"
+
+  set_env_kv .env "BROADCAST_CONNECTION" "reverb"
+  set_env_kv .env "REVERB_APP_ID" "$reverb_app_id"
+  set_env_kv .env "REVERB_APP_KEY" "$reverb_app_key"
+  set_env_kv .env "REVERB_APP_SECRET" "$reverb_app_secret"
+  set_env_kv .env "REVERB_HOST" "localhost"
+  set_env_kv .env "REVERB_PORT" "8080"
+  set_env_kv .env "REVERB_SCHEME" "http"
+
+  set_env_kv .env "VITE_REVERB_APP_KEY" '\${REVERB_APP_KEY}'
+  set_env_kv .env "VITE_REVERB_HOST" '\${REVERB_HOST}'
+  set_env_kv .env "VITE_REVERB_PORT" '\${REVERB_PORT}'
+  set_env_kv .env "VITE_REVERB_SCHEME" '\${REVERB_SCHEME}'
+
+  set_env_kv .env "CACHE_DRIVER" "redis"
+  set_env_kv .env "SESSION_DRIVER" "redis"
+  set_env_kv .env "QUEUE_CONNECTION" "redis"
+
+  log "Writing Redis settings into .env"
+  set_env_kv .env "REDIS_CLIENT" "phpredis"
+  set_env_kv .env "REDIS_HOST" "127.0.0.1"
+  set_env_kv .env "REDIS_PASSWORD" "null"
+  set_env_kv .env "REDIS_PORT" "6379"
+
+  log "Ensuring correct ownership"
+  if [[ -n "${WEB_HOME}" ]]; then
+    mkdir -p "${WEB_HOME}"
+    chown -R "${WEB_USER}:${WEB_GROUP}" "${WEB_HOME}" || true
+  fi
+  chown -R "${WEB_USER}:${WEB_GROUP}" "$INSTALL_DIR" || true
+
+  if [[ "${ID:-}" == "ubuntu" ]]; then
+    log "Checking Ubuntu PHP and extensions against the production Composer lock file"
+    [[ -f composer.lock ]] || die "composer.lock is missing; refusing to resolve new production dependencies"
+    sudo -u "${WEB_USER}" -H env HOME="${WEB_HOME}" bash -lc "
+      set -e
+      cd '${INSTALL_DIR}'
+      composer --no-interaction --no-plugins --no-scripts check-platform-reqs --lock --no-dev
+    " || die "Selected PHP ${PHP_VER}/extensions do not satisfy composer.lock. See Composer's errors above. Do not use composer update or ignore-platform-reqs to bypass this."
+  fi
+
+  log "Composer install"
+  sudo -u "${WEB_USER}" -H env HOME="${WEB_HOME}" bash -lc "
+    cd '${INSTALL_DIR}'
+    COMPOSER_NO_INTERACTION=1 composer install --no-dev --prefer-dist --no-progress
+  "
+
+  log "Running PFCentral install wizard: php artisan install"
+  if [[ -n "${DB_PASS:-}" ]] || [[ ! -t 0 ]]; then
+    (
+      cd "${INSTALL_DIR}"
+      php artisan install --no-interaction
+    )
+  else
+    echo
+    echo "============================================================" > /dev/tty
+    echo "The Laravel installer is now being launched directly on /dev/tty." > /dev/tty
+    echo "This avoids Laravel prompt lockups caused by tee/log redirection." > /dev/tty
+    echo "Answer the prompts normally. Press Enter to accept defaults." > /dev/tty
+    echo "============================================================" > /dev/tty
+    echo > /dev/tty
+
+    (
+      cd "${INSTALL_DIR}"
+      php artisan install
+    ) < /dev/tty > /dev/tty 2> /dev/tty
+  fi
+
+  final_fix_permissions
+
+  install_frontend_clean
+
+  log "Laravel post-setup"
+  run_as_runtime_user "
+    cd '${INSTALL_DIR}'
+    php artisan storage:link || true
+    php artisan config:clear || true
+    php artisan cache:clear || true
+    php artisan route:clear || true
+    php artisan view:clear || true
+    php artisan optimize:clear || true
+  "
+
+  log "Configuring sudoers for SSL management, Certbot, and Performance Tuning"
+  # Resolve actual certbot binary (may differ between /usr/bin and /snap/bin)
+  local certbot_bin
+  certbot_bin="$(command -v certbot || echo /usr/bin/certbot)"
+
+  cat >/etc/sudoers.d/pfcentral <<EOF
+# SSL / Nginx
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/certbot, ${certbot_bin}, /usr/sbin/nginx, /usr/bin/nginx, /usr/bin/systemctl reload nginx, /usr/bin/tee /etc/nginx/sites-available/pfcentral, /usr/bin/tee /etc/nginx/conf.d/pfcentral.conf
+# Performance Tuning — supervisor config writes
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/supervisor/conf.d/pfcentral-worker.conf
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/supervisor/conf.d/pfcentral-worker.ini
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/supervisor/conf.d/pfcentral-reverb.conf
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/supervisor/conf.d/pfcentral-reverb.ini
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/supervisord.d/pfcentral-worker.conf
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/supervisord.d/pfcentral-reverb.conf
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/supervisor.d/pfcentral-worker.ini
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/supervisor.d/pfcentral-reverb.ini
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/supervisor.d/pfcentral-worker.conf
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/supervisor.d/pfcentral-reverb.conf
+# Performance Tuning — FPM pool config writes
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/php/8.3/fpm/pool.d/www.conf
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/php/8.2/fpm/pool.d/www.conf
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/php-fpm.d/www.conf
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/php/php-fpm.d/www.conf
+# Performance Tuning — service restarts
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/supervisorctl reread, /usr/bin/supervisorctl update, /usr/bin/supervisorctl restart pfcentral-worker:*, /usr/bin/supervisorctl restart pfcentral-reverb:*
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart php8.3-fpm
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart php8.2-fpm
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart php8.1-fpm
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart php-fpm
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart php8-fpm
+EOF
+
+  # Ubuntu: permit the app's existing performance-tuning actions for the
+  # selected PHP series, rather than only the original 8.2/8.3 paths.
+  if [[ "${ID:-}" == "ubuntu" ]]; then
+    cat >>/etc/sudoers.d/pfcentral <<EOF
+# Ubuntu selected PHP runtime
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp /tmp/pfcentral_tune_* /etc/php/${PHP_VER}/fpm/pool.d/www.conf
+${RUNTIME_WEB_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ${PHP_SERVICE}
+EOF
+  fi
+
+  # If RUNTIME_WEB_USER is not www-data, also add www-data explicitly —
+  # PHP-FPM pool often runs as www-data regardless of the detected install user.
+  if [[ "${RUNTIME_WEB_USER}" != "www-data" ]] && id www-data >/dev/null 2>&1; then
+    cat >>/etc/sudoers.d/pfcentral <<EOF
+# SSL / Nginx (www-data — PHP-FPM pool user)
+www-data ALL=(ALL) NOPASSWD: /usr/bin/certbot, ${certbot_bin}, /usr/sbin/nginx, /usr/bin/systemctl reload nginx, /usr/bin/tee /etc/nginx/sites-available/pfcentral, /usr/bin/tee /etc/nginx/conf.d/pfcentral.conf
+EOF
+  fi
+
+  chmod 0440 /etc/sudoers.d/pfcentral || true
+
+  configure_nginx_site
+
+  log "Configuring Supervisor (Worker + Reverb)"
+  local supv_layout=""
+  local supv_conf_dir=""
+  local supv_ext="conf"
+  local supervisor_service=""
+
+  supervisor_service="$(ensure_supervisor_service_running)"
+  supv_layout="$(detect_supervisor_layout)"
+  supv_conf_dir="${supv_layout%%|*}"
+  supv_ext="${supv_layout##*|}"
+
+  mkdir -p "$supv_conf_dir"
+
+  rm -f "${supv_conf_dir}/pfcentral-worker.ini" "${supv_conf_dir}/pfcentral-worker.conf"         "${supv_conf_dir}/pfcentral-reverb.ini" "${supv_conf_dir}/pfcentral-reverb.conf" || true
+
+  # Scale workers based on available CPU cores (min 8, max 16)
+  local cpu_cores
+  cpu_cores="$(nproc 2>/dev/null || echo 4)"
+  local num_workers
+  num_workers=$(( cpu_cores * 2 ))
+  [[ $num_workers -lt 8  ]] && num_workers=8
+  [[ $num_workers -gt 16 ]] && num_workers=16
+
+  log "Configuring ${num_workers} queue workers (detected ${cpu_cores} CPU cores)"
+
+  cat >"${supv_conf_dir}/pfcentral-worker.${supv_ext}" <<EOF
+[program:pfcentral-worker]
+process_name=%(program_name)s_%(process_num)02d
+command=php ${INSTALL_DIR}/artisan queue:work redis --sleep=3 --tries=3 --max-time=3600
+autostart=true
+autorestart=true
+user=${RUNTIME_WEB_USER}
+numprocs=${num_workers}
+redirect_stderr=true
+stdout_logfile=${INSTALL_DIR}/storage/logs/worker.log
+stopwaitsecs=3600
+EOF
+
+  cat >"${supv_conf_dir}/pfcentral-reverb.${supv_ext}" <<EOF
+[program:pfcentral-reverb]
+command=php ${INSTALL_DIR}/artisan reverb:start --host=0.0.0.0 --port=8080
+directory=${INSTALL_DIR}
+autostart=true
+autorestart=true
+user=${RUNTIME_WEB_USER}
+numprocs=1
+redirect_stderr=true
+stdout_logfile=${INSTALL_DIR}/storage/logs/reverb.log
+stopasgroup=true
+killasgroup=true
+EOF
+
+  mkdir -p "${INSTALL_DIR}/storage/logs"
+  chown -R "${RUNTIME_WEB_USER}:${RUNTIME_WEB_GROUP}" "${INSTALL_DIR}/storage" || true
+  chmod -R ug+rwX "${INSTALL_DIR}/storage" || true
+
+  # Tune PHP-FPM for high concurrency (scaled to available RAM)
+  log "Tuning PHP-FPM pool for production scale"
+  local fpm_pool_conf=""
+  for f in "/etc/php/${PHP_VER}/fpm/pool.d/www.conf" "/etc/php-fpm.d/www.conf" "/etc/php/php-fpm.d/www.conf"; do
+    [[ -f "$f" ]] && { fpm_pool_conf="$f"; break; }
+  done
+
+  if [[ -n "$fpm_pool_conf" ]]; then
+    local total_ram_mb
+    total_ram_mb=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 ))
+    # Allow ~50MB per FPM child; cap between 10 and 40
+    local max_children=$(( total_ram_mb / 50 ))
+    [[ $max_children -lt 10 ]] && max_children=10
+    [[ $max_children -gt 40 ]] && max_children=40
+    local start_servers=$(( max_children / 4 ))
+    local min_spare=$start_servers
+    local max_spare=$(( max_children / 2 ))
+
+    log "PHP-FPM: pm.max_children=${max_children} (${total_ram_mb}MB RAM detected)"
+
+    sed -i "s/^pm = .*/pm = dynamic/"                              "$fpm_pool_conf" || true
+    sed -i "s/^pm\.max_children = .*/pm.max_children = ${max_children}/" "$fpm_pool_conf" || true
+    sed -i "s/^pm\.start_servers = .*/pm.start_servers = ${start_servers}/" "$fpm_pool_conf" || true
+    sed -i "s/^pm\.min_spare_servers = .*/pm.min_spare_servers = ${min_spare}/" "$fpm_pool_conf" || true
+    sed -i "s/^pm\.max_spare_servers = .*/pm.max_spare_servers = ${max_spare}/" "$fpm_pool_conf" || true
+    sed -i "s/^;pm\.max_requests = .*/pm.max_requests = 500/"      "$fpm_pool_conf" || true
+
+    systemctl restart "${PHP_SERVICE}" || true
+    log "PHP-FPM tuning applied to ${fpm_pool_conf}"
+  else
+    log "Warning: PHP-FPM pool config not found, skipping tuning"
+  fi
+
+  log "Starting Supervisor services..."
+  systemctl enable --now "${supervisor_service}" || true
+  systemctl restart "${supervisor_service}" || true
+  supervisorctl reread || true
+  supervisorctl update || true
+  supervisorctl start pfcentral-worker:* || supervisorctl start pfcentral-worker || true
+  supervisorctl start pfcentral-reverb || true
+
+  unset DB_PASS
+
+  final_fix_permissions
+  provision_cron
+
+  log "INSTALL COMPLETE"
+  echo
+  echo "============================================================"
+  echo "PFCentral installed at: ${INSTALL_DIR}"
+  echo "Browse: http://<server-ip>/"
+  echo "Log: ${LOG_FILE}"
+  echo "Detected runtime user/group: ${RUNTIME_WEB_USER}:${RUNTIME_WEB_GROUP}"
+  echo "Detected runtime home: ${WEB_HOME}"
+  echo "============================================================"
+}
+
+main "$@"

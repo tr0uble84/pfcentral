@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# PFCentral environment preparation and host-readiness wizard.
+# Application releases continue to be managed by the built-in GitHub updater.
+set -Eeuo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+
+# ---------------------------------------------------------------------------
+# Run pending database migrations before host preparation.
+# This ensures new columns (e.g. tls_public_key_pin, ssh_host_key_fingerprint)
+# are applied automatically whenever the upgrade script is executed.
+# ---------------------------------------------------------------------------
+APP_DIR="${INSTALL_DIR:-/var/www/pfcentral}"
+PHP_BIN="${PHP_BIN:-$(command -v php 2>/dev/null || true)}"
+
+if [ -z "$PHP_BIN" ]; then
+    echo 'WARNING: php not found in PATH; skipping database migrations.' >&2
+elif [ ! -f "${APP_DIR}/artisan" ]; then
+    echo "WARNING: ${APP_DIR}/artisan not found; skipping database migrations." >&2
+else
+    echo "==> Running pending database migrations..."
+    "$PHP_BIN" "${APP_DIR}/artisan" migrate --force
+    echo "    Migrations complete."
+fi
+
+# ---------------------------------------------------------------------------
+# Fix file ownership so the in-app updater (www-data) can write to all files.
+# This is needed when the upgrade script is run as root or another user, which
+# would leave newly-written files owned by root — causing "Permission denied"
+# errors the next time the in-app updater tries to overlay new release files.
+# ---------------------------------------------------------------------------
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+    echo "==> Setting ownership of ${APP_DIR} to www-data:www-data..."
+    chown -R www-data:www-data "${APP_DIR}"
+    echo "    Ownership fixed."
+else
+    # Non-root: warn if any files are not owned by the current user
+    if find "${APP_DIR}" -not -user "$(id -un)" -print -quit 2>/dev/null | grep -q .; then
+        echo "WARNING: Some files in ${APP_DIR} are not owned by $(id -un)." >&2
+        echo "         The in-app updater runs as www-data and may fail with" >&2
+        echo "         'Permission denied' when copying new release files." >&2
+        echo "         Fix: sudo chown -R www-data:www-data ${APP_DIR}" >&2
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Install/update SSL privilege wrappers.
+# These narrow wrapper scripts are the only sudo-accessible entry points for
+# certbot and nginx — granting www-data sudo access to certbot directly would
+# allow --deploy-hook injection (trivial root RCE if the web app is compromised).
+# This step is idempotent: safe to run on every upgrade.
+# ---------------------------------------------------------------------------
+SSL_PERMS_SCRIPT="${APP_DIR}/scripts/setup-ssl-permissions.sh"
+if [ -f "$SSL_PERMS_SCRIPT" ]; then
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        echo "==> Installing SSL privilege wrappers..."
+        bash "$SSL_PERMS_SCRIPT"
+    else
+        echo "INFO: Not running as root — skipping SSL wrapper install." >&2
+        echo "      Run manually if SSL certificate management is used:" >&2
+        echo "      sudo bash ${SSL_PERMS_SCRIPT}" >&2
+    fi
+else
+    echo "WARNING: ${SSL_PERMS_SCRIPT} not found; skipping SSL wrapper install." >&2
+fi
+
+# ---------------------------------------------------------------------------
+# Delegate to the host-readiness wizard for the remaining preparation steps.
+# ---------------------------------------------------------------------------
+command -v python3 >/dev/null || {
+    echo 'Python 3.9+ is required: apt-get install python3 / dnf install python3 / pacman -S python' >&2
+    exit 1
+}
+exec python3 -B "${script_dir}/scripts/security_upgrade/wizard.py" "$@"

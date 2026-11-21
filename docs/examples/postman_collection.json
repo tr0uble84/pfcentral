@@ -1,0 +1,154 @@
+{
+  "info": {
+    "name": "PFCentral MSP Inventory and Status API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Read-only MSP inventory. Set the token privately in a local Postman environment. Fetch every firewall page through meta.last_page. No credentials or customer inventory are included."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://pfcentral.example.com/api/v1"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "companyId",
+      "value": "1"
+    },
+    {
+      "key": "firewallId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Confirm MSP token scope",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/me"
+      }
+    },
+    {
+      "name": "List all companies",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/companies"
+      }
+    },
+    {
+      "name": "Read one company",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/companies/{{companyId}}"
+      }
+    },
+    {
+      "name": "List all firewall inventory - page 1",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/firewalls?per_page=100&page=1"
+      }
+    },
+    {
+      "name": "Filter firewalls by company",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/firewalls?company_id={{companyId}}&per_page=100&page=1"
+      }
+    },
+    {
+      "name": "Read one firewall",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/firewalls/{{firewallId}}"
+      }
+    },
+    {
+      "name": "Download OpenAPI specification",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/openapi.json"
+      }
+    },
+    {
+      "name": "Read all firewall status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/firewalls/status?per_page=100&page=1"
+      }
+    },
+    {
+      "name": "Read one firewall status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/firewalls/{{firewallId}}/status"
+      }
+    }
+  ]
+}

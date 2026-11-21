@@ -1,0 +1,111 @@
+name: Publish release
+
+# Publishing a version = change VERSION on main (e.g. v0.8.2) and push.
+# This runs the VPN and mail tests, then creates the tag and the GitHub release
+# with that version's notes from CHANGELOG.md ("### Added — v0.8.2" sections).
+# PFCentral's built-in updater picks the new release up from there.
+# An existing release is never changed. Actions are pinned to commit SHAs (org policy).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - VERSION
+      - .github/workflows/publish-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APP_ENV: testing
+      APP_KEY: base64:eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=
+      # MySQL like the servers (SQLite missed MySQL's 64-character index name limit in v0.8.5).
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: pfcentral_test
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: array
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Read VERSION
+        id: v
+        run: |
+          tag="$(tr -d ' \r\n' < VERSION)"
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::VERSION must look like v1.2.3 (found '$tag')"; exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists: nothing to do."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # setup-php sometimes hangs on the runner's package mirrors; give it 6 minutes, then try once more.
+      - name: Set up PHP
+        id: php1
+        if: steps.v.outputs.exists == 'false'
+        timeout-minutes: 6
+        continue-on-error: true
+        uses: shivammathur/setup-php@b2f833f7d1c070621af195c088d275c4cd60ef8f # 2.9.0
+        with:
+          php-version: '8.4'
+          extensions: mbstring, intl, pdo_sqlite, pdo_mysql, sodium, bcmath
+          tools: composer:v2
+          coverage: none
+
+      - name: Set up PHP (second try)
+        if: steps.v.outputs.exists == 'false' && steps.php1.outcome != 'success'
+        timeout-minutes: 8
+        uses: shivammathur/setup-php@b2f833f7d1c070621af195c088d275c4cd60ef8f # 2.9.0
+        with:
+          php-version: '8.4'
+          extensions: mbstring, intl, pdo_sqlite, pdo_mysql, sodium, bcmath
+          tools: composer:v2
+          coverage: none
+
+      - name: Run the VPN and mail tests
+        if: steps.v.outputs.exists == 'false'
+        run: |
+          sudo systemctl start mysql.service
+          mysql -h127.0.0.1 -uroot -proot -e 'CREATE DATABASE pfcentral_test'
+          composer install --no-scripts --no-plugins --no-interaction --prefer-dist --no-progress
+          php artisan package:discover --no-ansi
+          vendor/bin/phpunit tests/Feature/VpnModuleTest.php tests/Feature/MandrillMailTest.php tests/Feature/SystemSettingsPortTest.php
+
+      - name: Release notes from CHANGELOG.md
+        if: steps.v.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          awk -v tag="$TAG" '
+            /^##+ / { inside = (index($0, "— " tag) > 0); if (inside) { h = $0; sub(/ — .*/, "", h); print h } next }
+            inside { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then echo "See CHANGELOG.md." > notes.md; fi
+          cat notes.md
+
+      - name: Create tag and release
+        if: steps.v.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$TAG" --notes-file notes.md --latest

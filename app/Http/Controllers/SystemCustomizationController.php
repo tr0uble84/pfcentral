@@ -1,0 +1,499 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\SystemSetting;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Cache;
+
+class SystemCustomizationController extends Controller
+{
+    public function index()
+    {
+        $settings = SystemSetting::pluck('value', 'key')->toArray();
+
+        // Add current env values if not in settings DB (for display)
+        if (!isset($settings['site_url'])) {
+            $url = config('app.url');
+            $parsed = parse_url($url);
+            $settings['site_url'] = $parsed['host'] ?? $url;
+            $settings['site_protocol'] = $parsed['scheme'] ?? 'https';
+        }
+
+        // Get current version
+        $versionPath = base_path('VERSION');
+        $currentVersion = 'v0.0.0';
+
+        if (file_exists($versionPath) && is_readable($versionPath)) {
+            $content = @file_get_contents($versionPath);
+            if ($content !== false) {
+                $currentVersion = trim($content);
+            }
+        }
+
+        return view('system.customization.index', compact('settings', 'currentVersion'));
+    }
+
+    /**
+     * Simple endpoint to verify hostname reachability.
+     * Accessible via CORS to allow pre-switch checks.
+     */
+    public function checkHostname()
+    {
+        return response()->json(['status' => 'ok'])
+            ->header('Access-Control-Allow-Origin', '*')
+            ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+            ->header('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With');
+    }
+
+    /**
+     * Server-side proxy to check hostname reachability
+     * Avoids Mixed Content (HTTPS -> HTTP) issues in browser
+     */
+    public function proxyCheck(Request $request)
+    {
+        $request->validate([
+            'url' => 'required|url'
+        ]);
+
+        $url = $request->input('url');
+
+        $parsed = parse_url($url);
+        $host   = $parsed['host'] ?? '';
+
+        if (!$host) {
+            return response()->json(['status' => 'error', 'message' => 'Invalid URL.'], 400);
+        }
+
+        // Resolve the new hostname.
+        $newIp = gethostbyname($host);
+        if ($newIp === $host) {
+            return response()->json(['status' => 'error', 'message' => "Could not resolve hostname: {$host}"], 400);
+        }
+
+        // Resolve the current hostname so we can compare IPs.
+        // If both resolve to the same IP the new hostname is already pointing at
+        // this server — no HTTP round-trip needed (avoids hairpin NAT issues and
+        // the fact that nginx doesn't serve the new vhost until after the switch).
+        $currentHost = parse_url(config('app.url'), PHP_URL_HOST) ?? '';
+        $currentIp   = $currentHost ? gethostbyname($currentHost) : '';
+
+        if ($newIp === $currentIp && $newIp !== $currentHost) {
+            // Same IP → new hostname already points at this server. ✓
+            return response()->json(['status' => 'ok']);
+        }
+
+        // IPs differ (or we couldn't resolve the current host) — fall back to an
+        // HTTP probe. This handles cases like Cloudflare-proxied hostnames where
+        // the new hostname routes through a CDN IP rather than the server's own IP.
+        // We accept ANY HTTP response (including 4xx/5xx) — if a web server answers
+        // at all, DNS and routing are confirmed to be working end-to-end.
+        try {
+            $client = new \GuzzleHttp\Client([
+                'timeout'           => 8,
+                'verify'            => false,
+                'allow_redirects'   => true,
+                'http_errors'       => false, // don't throw on 4xx/5xx
+            ]);
+
+            $response = $client->get($url . '/system/check-hostname');
+
+            // Any HTTP response means traffic is reaching a web server. ✓
+            return response()->json(['status' => 'ok']);
+
+        } catch (\GuzzleHttp\Exception\ConnectException $e) {
+            \Illuminate\Support\Facades\Log::warning('Proxy check: connection failed', ['url' => $url, 'error' => $e->getMessage()]);
+            return response()->json(['status' => 'error', 'message' => 'Host is not reachable (connection refused or timed out).'], 400);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Proxy check failed', ['url' => $url, 'error' => $e->getMessage()]);
+            return response()->json(['status' => 'error', 'message' => 'Verification failed.'], 400);
+        }
+    }
+
+    public function update(Request $request, \App\Services\SystemConfigurationService $configService, \App\Services\SslManagerService $sslManager)
+    {
+        $request->validate([
+            'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            'favicon' => 'nullable|mimes:ico,png|max:1024',
+            'theme' => 'required|in:light,dark',
+            'status_check_interval' => 'nullable|integer|min:5|max:300',
+            'realtime_interval' => 'nullable|integer|min:2|max:300',
+            'fallback_interval' => 'nullable|integer|min:5|max:600',
+            'sidebar_bg' => 'nullable|regex:/^#[0-9a-fA-F]{6}$/',
+            'sidebar_text' => 'nullable|regex:/^#[0-9a-fA-F]{6}$/',
+            'enable_status_cache' => 'nullable|boolean',
+            'site_url' => ['nullable', 'string', 'min:3', 'max:255', 'regex:/^[a-zA-Z0-9]([a-zA-Z0-9.\-]*[a-zA-Z0-9])$/'],
+            'site_protocol' => 'nullable|in:http,https',
+            'mail_driver' => 'nullable|in:mailgun,mandrill,log',
+            'mandrill_secret' => 'nullable|string|max:200',
+            'mailgun_domain' => 'nullable|string',
+            'mailgun_secret' => 'nullable|string',
+            'mail_from_address' => 'nullable|email',
+            'mail_from_name' => 'nullable|string|max:255',
+            'dashboard_default_layout' => 'nullable|in:cards,compact,list',
+        ]);
+
+        if ($request->filled('site_url') && $request->filled('site_protocol')) {
+            $hostname = $request->site_url;
+            $scheme = $request->site_protocol;
+
+            // Clean hostname if user entered full URL
+            $hostname = str_replace(['http://', 'https://', '/'], '', $hostname);
+
+            // Get Current State
+            $currentUrl = config('app.url');
+            $parsed = parse_url($currentUrl);
+            $currentHost = $parsed['host'] ?? null;
+            $currentScheme = $parsed['scheme'] ?? 'http';
+            $currentPort = $parsed['port'] ?? null;
+
+            // Detect Hostname Change
+            if ($currentHost && $hostname !== $currentHost) {
+                // If we were using SSL, we must clean up old certs and force HTTP for new domain
+                if ($currentScheme === 'https') {
+                    $sslManager->deleteCertificate($currentHost);
+                    $scheme = 'http'; // Force HTTP for new domain
+                }
+
+                // Apply new Nginx Config (HTTP) via uninstall method (reverts to HTTP standard)
+                $sslManager->uninstall($hostname);
+            } elseif ($scheme !== $currentScheme) {
+                // Hostname unchanged, scheme changed (keeps a custom port)
+                $configService->updateSystemHostname($hostname, $scheme);
+            }
+            // Nothing changed: leave .env and Nginx alone (saving other settings must not rewrite APP_URL).
+
+            SystemSetting::updateOrCreate(['key' => 'site_url'], ['value' => $hostname]);
+            SystemSetting::updateOrCreate(['key' => 'site_protocol'], ['value' => $scheme]);
+
+            // Force redirect if the full URL (scheme + host) has changed
+            $newBaseUrl = "{$scheme}://{$hostname}" . ($hostname === $currentHost && $currentPort ? ":{$currentPort}" : '');
+            if (rtrim($newBaseUrl, '/') !== rtrim(config('app.url'), '/')) {
+                return redirect($newBaseUrl . '/system/settings')->with('success', 'System settings updated. Redirecting to new address...');
+            }
+        }
+
+        if ($request->hasFile('logo')) {
+            $path = $request->file('logo')->store('customization', 'public');
+            SystemSetting::updateOrCreate(['key' => 'logo_path'], ['value' => Storage::url($path)]);
+        }
+
+        if ($request->hasFile('favicon')) {
+            $path = $request->file('favicon')->store('customization', 'public');
+            SystemSetting::updateOrCreate(['key' => 'favicon_path'], ['value' => Storage::url($path)]);
+        }
+
+        SystemSetting::updateOrCreate(['key' => 'theme'], ['value' => $request->theme]);
+
+        // Polling Intervals
+        if ($request->filled('status_check_interval')) {
+            SystemSetting::updateOrCreate(['key' => 'status_check_interval'], ['value' => $request->status_check_interval]);
+        }
+
+        if ($request->filled('realtime_interval')) {
+            SystemSetting::updateOrCreate(['key' => 'realtime_interval'], ['value' => $request->realtime_interval]);
+        }
+
+        if ($request->filled('fallback_interval')) {
+            SystemSetting::updateOrCreate(['key' => 'fallback_interval'], ['value' => $request->fallback_interval]);
+        }
+
+        // Sidebar Appearance
+        if ($request->filled('sidebar_bg')) {
+            SystemSetting::updateOrCreate(['key' => 'sidebar_bg'], ['value' => $request->sidebar_bg]);
+        }
+
+        if ($request->filled('sidebar_text')) {
+            SystemSetting::updateOrCreate(['key' => 'sidebar_text'], ['value' => $request->sidebar_text]);
+        }
+
+        // Dashboard defaults
+        if ($request->filled('dashboard_default_layout')) {
+            SystemSetting::updateOrCreate(['key' => 'dashboard_default_layout'], ['value' => $request->dashboard_default_layout]);
+        }
+
+        if ($request->has('enable_status_cache')) {
+            SystemSetting::updateOrCreate(['key' => 'enable_status_cache'], ['value' => $request->enable_status_cache]);
+        }
+
+        // Mail Configuration
+        if ($request->filled('mail_driver')) {
+            SystemSetting::updateOrCreate(['key' => 'mail_driver'], ['value' => $request->mail_driver]);
+        }
+
+        if ($request->filled('mailgun_domain')) {
+            SystemSetting::updateOrCreate(['key' => 'mailgun_domain'], ['value' => $request->mailgun_domain]);
+        }
+
+        if ($request->filled('mailgun_secret')) {
+            SystemSetting::updateOrCreate(['key' => 'mailgun_secret'], ['value' => $request->mailgun_secret]);
+        }
+
+        if ($request->filled('mailgun_endpoint')) {
+            SystemSetting::updateOrCreate(['key' => 'mailgun_endpoint'], ['value' => $request->mailgun_endpoint]);
+        }
+
+        if ($request->filled('mandrill_secret')) {
+            // Stored encrypted; a blank field keeps the saved key.
+            SystemSetting::updateOrCreate(['key' => 'mandrill_secret'], ['value' => \Illuminate\Support\Facades\Crypt::encryptString(trim($request->mandrill_secret))]);
+        }
+
+        if ($request->filled('mail_from_address')) {
+            SystemSetting::updateOrCreate(['key' => 'mail_from_address'], ['value' => $request->mail_from_address]);
+        }
+
+        if ($request->filled('mail_from_name')) {
+            SystemSetting::updateOrCreate(['key' => 'mail_from_name'], ['value' => $request->mail_from_name]);
+        }
+
+        return redirect()->route('system.settings.index')->with('success', 'Settings updated successfully.');
+    }
+
+    public function restore(Request $request)
+    {
+        $request->validate([
+            'type' => 'required|in:logo,favicon',
+        ]);
+
+        $key = $request->type === 'logo' ? 'logo_path' : 'favicon_path';
+
+        // Delete the setting to restore default
+        SystemSetting::where('key', $key)->delete();
+
+        return redirect()->route('system.settings.index')->with('success', ucfirst($request->type) . ' restored to default.');
+    }
+    public function testEmail(Request $request)
+    {
+        $request->validate(['test_email' => 'required|email']);
+
+        try {
+            \Illuminate\Support\Facades\Mail::to($request->test_email)->send(new \App\Mail\TestEmail());
+            return response()->json(['success' => true, 'message' => 'Test email sent successfully!']);
+        } catch (\Exception $e) {
+            $why = strtok($e->getMessage(), "\r\n");
+            return response()->json(['success' => false, 'message' => 'Failed to send test email' . ($why ? ": {$why}" : '.')], 500);
+        }
+    }
+
+    /**
+     * Check for system updates.
+     */
+    public function checkUpdates(\App\Services\UpdateService $updater)
+    {
+        $currentVersion = 'v0.0.0';
+        $versionPath = base_path('VERSION');
+        if (file_exists($versionPath)) {
+            $currentVersion = trim(file_get_contents($versionPath));
+        }
+
+        $latest = $updater->checkForUpdates();
+
+        if (!$latest) {
+            return response()->json([
+                'update_available' => false,
+                'message' => 'Could not fetch updates.'
+            ]);
+        }
+
+        $newVersion = $latest['tag_name'];
+        $available = $updater->isNewVersionAvailable($currentVersion, $newVersion);
+
+        return response()->json([
+            'update_available' => $available,
+            'version' => $newVersion,
+            'message' => $available ? 'Update available!' : 'System is up to date.'
+        ]);
+    }
+
+    /**
+     * Lightweight global check with caching to avoid API rate limits.
+     */
+    public function checkGlobal(\App\Services\UpdateService $updater)
+    {
+        // Generate dynamic cache key based on VERSION file modification time
+        // AND the resolved prerelease flag — toggling the setting must bust the cache.
+        $versionPath = base_path('VERSION');
+        $timestamp = file_exists($versionPath) ? filemtime($versionPath) : 0;
+        $currentVersion = file_exists($versionPath) ? trim(file_get_contents($versionPath)) : 'v0.0.0';
+        $prereleaseSuffix = $updater->allowPrereleases() ? '_pre' : '_stable';
+
+        $cacheKey = 'system_update_latest_v5_' . $timestamp . $prereleaseSuffix;
+
+        // Allow manual bypass via query string
+        if (request()->has('force')) {
+            Cache::forget($cacheKey);
+        }
+
+        $latest = Cache::get($cacheKey);
+
+        if (!$latest) {
+            $latest = $updater->checkForUpdates();
+
+            if ($latest) {
+                // Smart Caching:
+                // If an update is available, cache for 1 hour.
+                // If NO update is available, cache for only 5 minutes.
+                $isNewer = $updater->isNewVersionAvailable($currentVersion, $latest['tag_name']);
+                $ttl = $isNewer ? 3600 : 300;
+
+                Cache::put($cacheKey, $latest, $ttl);
+            }
+        }
+
+        if (!$latest) {
+            return response()->json(['update_available' => false]);
+        }
+
+        $currentVersion = 'v0.0.0';
+        $versionPath = base_path('VERSION');
+        if (file_exists($versionPath)) {
+            $currentVersion = trim(file_get_contents($versionPath));
+        }
+
+        $newVersion = $latest['tag_name'];
+        $available = $updater->isNewVersionAvailable($currentVersion, $newVersion);
+
+        // Check if this version has been ignored
+        if ($available) {
+            $ignoredVersion = SystemSetting::where('key', 'ignored_update_version')->value('value');
+            // Clean versions for comparison
+            $cleanNew = ltrim($newVersion, 'v');
+            $cleanIgnored = ltrim($ignoredVersion ?? '', 'v');
+
+            if ($cleanNew === $cleanIgnored) {
+                $available = false;
+            }
+        }
+
+        return response()->json([
+            'update_available'   => $available,
+            'version'            => $newVersion,
+            'current_version'    => $currentVersion,
+            'is_prerelease'      => (bool) ($latest['prerelease'] ?? false),
+            'allow_prereleases'  => $updater->allowPrereleases(),
+        ]);
+    }
+
+    /**
+     * Trigger system update installation.
+     */
+    public function installUpdate(Request $request, \App\Services\UpdateService $updater)
+    {
+        $latest = $updater->checkForUpdates();
+
+        if (!$latest) {
+            return response()->json(['status' => 'error', 'message' => 'No update information found.'], 404);
+        }
+
+        $newVersion = $latest['tag_name'];
+
+        // Create pending record
+        \App\Models\SystemUpdate::create([
+            'available_version' => $newVersion,
+            'status' => 'pending_install',
+            'requested_by' => auth()->id(),
+            'requested_at' => now(),
+            'log' => ['Update requested via Settings Card at ' . now()],
+        ]);
+
+        // Run the update command synchronously since queue worker might not be running
+        // This ensures the update logic executes immediately.
+        try {
+            \Illuminate\Support\Facades\Artisan::call('system:install-update');
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => 'Update start failed: ' . $e->getMessage()], 500);
+        }
+
+        return response()->json(['status' => 'success', 'message' => 'Update started. The system is updating locally.']);
+    }
+    /**
+     * Clear all update records to reset stuck state.
+     */
+    public function resetUpdates()
+    {
+        try {
+            \App\Models\SystemUpdate::truncate();
+            // Clear current dynamic cache key
+            $versionPath = base_path('VERSION');
+            $timestamp = file_exists($versionPath) ? filemtime($versionPath) : 0;
+            Cache::forget('system_update_latest_v5_' . $timestamp);
+
+            // Clear legacy key
+            \Illuminate\Support\Facades\Cache::forget('system_update_latest_v4');
+            return response()->json(['status' => 'success', 'message' => 'Update state reset and cache cleared successfully.']);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+    /**
+     * Check the status of the current update.
+     */
+    public function checkUpdateStatus()
+    {
+        $update = \App\Models\SystemUpdate::latest()->first();
+
+        if (!$update) {
+            return response()->json(['status' => 'idle']);
+        }
+
+        // If update is complete, clear the ignored version flag so future updates invoke prompts again
+        if ($update->status === 'complete') {
+            SystemSetting::where('key', 'ignored_update_version')->delete();
+        }
+
+        return response()->json([
+            'status' => $update->status,
+            'log' => $update->log,
+            'last_error' => $update->last_error,
+            'version' => $update->available_version
+        ]);
+    }
+
+    /**
+     * Dismiss an update version (ignore it until next release).
+     */
+    public function dismissUpdate(Request $request)
+    {
+        $request->validate([
+            'version' => 'required|string'
+        ]);
+
+        $version = $request->input('version');
+
+        // Strip 'v' prefix if present to ensure consistency
+        $version = ltrim($version, 'v');
+
+        SystemSetting::updateOrCreate(
+            ['key' => 'ignored_update_version'],
+            ['value' => $version]
+        );
+
+        return response()->json(['status' => 'success']);
+    }
+
+    /**
+     * Save the update channel preference (allow_prereleases).
+     * Rejected when ALLOW_PRERELEASES is set in .env — env always wins.
+     */
+    public function updateChannel(Request $request): \Illuminate\Http\JsonResponse
+    {
+        if (config('services.github.allow_prereleases') !== null) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Update channel is controlled by ALLOW_PRERELEASES in .env and cannot be changed here.',
+            ], 403);
+        }
+
+        $request->validate([
+            'allow_prereleases' => 'required|boolean',
+        ]);
+
+        SystemSetting::updateOrCreate(
+            ['key'   => 'allow_prereleases'],
+            ['value' => $request->boolean('allow_prereleases') ? '1' : '0']
+        );
+
+        return response()->json(['status' => 'success']);
+    }
+}

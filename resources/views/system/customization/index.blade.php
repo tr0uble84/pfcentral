@@ -1,0 +1,2145 @@
+<x-app-layout>
+    <x-slot name="header">
+        <h2 class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight">
+            {{ __('System Settings') }}
+        </h2>
+    </x-slot>
+
+    <div class="py-12">
+        <div class="max-w-full mx-auto sm:px-6 lg:px-8 space-y-6">
+
+            <form method="POST" action="{{ route('system.settings.update') }}" enctype="multipart/form-data" x-data="{ 
+                      activeTab: 'configuration',
+                      sidebarBg: '{{ $settings['sidebar_bg'] ?? '#0E2238' }}', 
+                      sidebarText: '{{ $settings['sidebar_text'] ?? '#CBD5E1' }}',
+                      recommendedText() {
+                        const r = parseInt(this.sidebarBg.substr(1,2),16);
+                        const g = parseInt(this.sidebarBg.substr(3,2),16);
+                        const b = parseInt(this.sidebarBg.substr(5,2),16);
+                        const yiq = ((r*299)+(g*587)+(b*114))/1000;
+                        return (yiq >= 128) ? '#1f2937' : '#ffffff';
+                      }
+                  }">
+                @csrf
+                @method('POST')
+
+                <!-- Tabs Navigation -->
+                <div class="border-b border-gray-200 dark:border-gray-700 mb-6">
+                    <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+                        <button type="button" @click="activeTab = 'configuration'"
+                            :class="activeTab === 'configuration' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'"
+                            class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-150">
+                            System Configuration
+                        </button>
+
+                        <button type="button" @click="activeTab = 'maintenance'"
+                            :class="activeTab === 'maintenance' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'"
+                            class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-150">
+                            Maintenance & Operations
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- Maintenance Tab Content -->
+                <div x-show="activeTab === 'maintenance'" x-transition:enter="transition ease-out duration-200"
+                    x-transition:enter-start="opacity-0 translate-y-2"
+                    x-transition:enter-end="opacity-100 translate-y-0" style="display: none;">
+
+                    <!-- Section: System Updates -->
+                    <div class="card-modern" x-data="systemUpdater()"
+                        @system-update-initiating.window="installing = true; updateAvailable = false; message = 'Queueing update...'; isError = false;"
+                        @system-update-started.window="installing = true; updateAvailable = false; message = 'Update started...';"
+                        @system-update-failed.window="installing = false; isError = true; message = $event.detail?.message || 'Update failed.'; checkForUpdates();"
+                        @system-update-status.window="handleStatus($event.detail)">
+                        @php $envLocked = config('services.github.allow_prereleases') !== null; @endphp
+                        <div class="card-header-modern">
+                            <div class="card-icon-wrapper">
+                                <svg class="card-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            </div>
+                            <div class="flex-1">
+                                <h3 class="card-title-modern">System Updates</h3>
+                                <p class="card-subtitle-modern">Update your system to the latest version.</p>
+                            </div>
+
+                            <!-- Pre-release toggle — right-side header slot -->
+                            <div class="flex items-center gap-3 flex-shrink-0">
+                                @if($envLocked)
+                                    <!-- Env-locked: text label + lock badge -->
+                                    <div class="text-right">
+                                        <div class="text-xs font-medium text-gray-700 dark:text-gray-300">Pre-release updates</div>
+                                        <div class="text-xs text-gray-400 dark:text-gray-500">Include pre-release and beta builds</div>
+                                    </div>
+                                    <span class="inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700/40 rounded-full px-2 py-0.5"
+                                        title="ALLOW_PRERELEASES is set in .env — cannot be changed from the UI">
+                                        <svg class="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                                        </svg>
+                                        Locked by .env
+                                    </span>
+                                @else
+                                    <!-- Text label (two lines) + spinner + toggle -->
+                                    <div class="text-right">
+                                        <div class="text-xs font-medium text-gray-700 dark:text-gray-300 select-none">Pre-release updates</div>
+                                        <div class="text-xs text-gray-400 dark:text-gray-500 select-none">Include pre-release and beta builds</div>
+                                    </div>
+                                    <svg x-show="savingChannel" x-cloak class="animate-spin h-3.5 w-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    <button type="button" role="switch"
+                                        :aria-checked="allowPrereleases.toString()"
+                                        @click="saveUpdateChannel()"
+                                        :disabled="savingChannel"
+                                        :class="allowPrereleases ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-600'"
+                                        class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 cursor-pointer disabled:cursor-wait disabled:opacity-70">
+                                        <span class="sr-only">Include pre-release updates</span>
+                                        <span :class="allowPrereleases ? 'translate-x-4' : 'translate-x-0'"
+                                            class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out">
+                                        </span>
+                                    </button>
+                                @endif
+                            </div>
+                        </div>
+                        <div class="card-body-modern">
+                            <!-- Current Version Display (Always Visible) -->
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="text-sm font-medium text-gray-900 dark:text-white">
+                                    Current Version
+                                </div>
+                                <div class="text-sm font-mono font-bold text-gray-600 dark:text-gray-300">
+                                    v{{ ltrim($currentVersion ?? '0.0.0', 'v') }}
+                                </div>
+                            </div>
+
+                            <!-- Update Available Alert (Full Width) -->
+                            <template x-if="updateAvailable && !installing && !isError">
+                                <div
+                                    class="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg p-4 flex items-center justify-between">
+                                    <div>
+                                        <div class="text-sm font-bold text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                                            Update Available: <span x-text="version"></span>
+                                            <template x-if="isPrerelease">
+                                                <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-bold bg-amber-400 text-amber-900">PRE-RELEASE</span>
+                                            </template>
+                                        </div>
+                                        <div class="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                            A new version is ready to install.
+                                        </div>
+                                    </div>
+                                    <button type="button" @click="installUpdate" :disabled="installing"
+                                        class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 transition-colors">
+                                        <span x-show="!installing">Install Update &rarr;</span>
+                                        <span x-show="installing">Queueing...</span>
+                                    </button>
+                                </div>
+                            </template>
+
+                            <!-- Up to Date State -->
+                            <template
+                                x-if="!updateAvailable && !checking && !installing && !isError && !updateComplete">
+                                <div
+                                    class="bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg p-4 text-center">
+                                    <svg class="h-6 w-6 text-green-500 mx-auto mb-2" fill="none" viewBox="0 0 24 24"
+                                        stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                        System is up to date
+                                    </div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        You are running the latest version.
+                                    </div>
+                                    <div class="mt-4">
+                                        <button type="button" @click="checkForUpdates(true)"
+                                            class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-600 transition-colors">
+                                            <svg class="-ml-0.5 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg"
+                                                fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                            </svg>
+                                            Check for Updates
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- Error State -->
+                            <template x-if="isError">
+                                <div
+                                    class="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-lg p-4">
+                                    <div class="flex">
+                                        <div class="flex-shrink-0">
+                                            <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg"
+                                                viewBox="0 0 20 20" fill="currentColor">
+                                                <path fill-rule="evenodd"
+                                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                                                    clip-rule="evenodd" />
+                                            </svg>
+                                        </div>
+                                        <div class="ml-3">
+                                            <h3 class="text-sm font-medium text-red-800 dark:text-red-200">Update Failed
+                                            </h3>
+                                            <div class="mt-2 text-sm text-red-700 dark:text-red-300">
+                                                <p x-text="message"></p>
+                                            </div>
+                                            <div class="mt-4">
+                                                <button type="button" @click="isError = false; checkForUpdates()"
+                                                    class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+                                                    Try Again
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- Update Complete (Green) -->
+                            <template x-if="updateComplete">
+                                <div
+                                    class="bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800 rounded-lg p-4 flex items-center justify-between">
+                                    <div class="flex items-center">
+                                        <div class="flex-shrink-0">
+                                            <svg class="h-6 w-6 text-green-500" fill="none" viewBox="0 0 24 24"
+                                                stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                        </div>
+                                        <div class="ml-3">
+                                            <p class="text-sm font-medium text-green-800 dark:text-green-200">Update
+                                                Complete!</p>
+                                            <p class="text-xs text-green-600 dark:text-green-400 mt-1">Reload the page
+                                                to apply changes.</p>
+                                        </div>
+                                    </div>
+                                    <button @click="window.dispatchEvent(new CustomEvent('system-update-reload'))"
+                                        class="bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded transition-colors">
+                                        Reload Now
+                                    </button>
+                                </div>
+                            </template>
+
+                            <!-- Installing State -->
+                            <template x-if="installing && !updateComplete">
+                                <div
+                                    class="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg p-4">
+                                    <div class="flex items-center">
+                                        <div class="flex-shrink-0">
+                                            <svg class="animate-spin h-5 w-5 text-blue-600 dark:text-blue-400"
+                                                xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                                    stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor"
+                                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                                </path>
+                                            </svg>
+                                        </div>
+                                        <div class="ml-3 w-0 flex-1 pt-0.5">
+                                            <p class="text-sm font-medium text-blue-900 dark:text-blue-100"
+                                                x-text="message || 'Update in progress...'"></p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- Checking State -->
+                            <template x-if="checking && !installing">
+                                <div class="p-4 text-center">
+                                    <svg class="animate-spin h-5 w-5 text-indigo-500 mx-auto mb-2"
+                                        xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                            stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor"
+                                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                        </path>
+                                    </svg>
+                                    <span class="text-sm text-gray-500 dark:text-gray-400"
+                                        x-text="installing ? 'Update in progress...' : 'Checking for updates...'"></span>
+                                </div>
+                            </template>
+                        </div>
+
+                    </div>
+
+                    <script>
+                        function systemUpdater() {
+                            return {
+                                checking: false,
+                                installing: false,
+                                updateAvailable: {{ ($updateAvailable ?? false) ? 'true' : 'false' }},
+                                updateComplete: false,
+                                message: '',
+                                isError: false,
+                                version: '',
+                                pollInterval: null,
+                                isPrerelease: false,
+                                allowPrereleases: {{ ($settings['allow_prereleases'] ?? '0') === '1' ? 'true' : 'false' }},
+                                savingChannel: false,
+
+                                init() {
+                                    // Check if we are already installing
+                                    if (localStorage.getItem('pfcentral_update_active')) {
+                                        this.installing = true;
+                                        this.updateAvailable = false;
+                                        this.message = 'Update in progress...';
+                                    } else {
+                                        this.checkForUpdates();
+                                    }
+                                },
+
+                                handleStatus(data) {
+                                    if (data.status === 'complete') {
+                                        this.installing = false;
+                                        this.updateComplete = true;
+                                        this.updateAvailable = false;
+                                        this.message = 'Update Complete!';
+                                    }
+                                    else if (data.status === 'failed') {
+                                        this.installing = false;
+                                        this.isError = true;
+                                        this.message = data.last_error || 'Update failed.';
+                                    }
+                                    else if (data.status === 'idle') {
+                                        if (this.installing) {
+                                            this.installing = false;
+                                            this.checkForUpdates();
+                                        }
+                                    }
+                                    else {
+                                        // Catch-all for any other status (installing, downloading, etc.)
+                                        this.installing = true;
+                                        this.updateAvailable = false;
+
+                                        let statusMsg = 'Update in progress...';
+                                        if (data.status === 'pending_install') statusMsg = 'Update queued...';
+                                        else if (data.status === 'downloading') statusMsg = 'Downloading package...';
+                                        else if (data.status === 'installing') statusMsg = 'Installing update...';
+
+                                        this.message = statusMsg;
+                                    }
+                                },
+
+                                async checkForUpdates(force = false) {
+                                    this.checking = true;
+                                    try {
+                                        let url = '{{ route("system.updates.check-global") }}';
+                                        if (force) url += '?force=1';
+
+                                        const response = await fetch(url);
+                                        const data = await response.json();
+
+                                        this.isPrerelease     = !!data.is_prerelease;
+                                        this.allowPrereleases = !!data.allow_prereleases;
+
+                                        if (data.update_available && !this.installing) {
+                                            this.updateAvailable = true;
+                                            this.version = (data.version || '').replace(/^v/, '');
+                                        }
+                                        else {
+                                            this.updateAvailable = false;
+                                        }
+                                    } catch (e) {
+                                        console.error('Update check failed:', e);
+                                    } finally {
+                                        this.checking = false;
+                                    }
+                                },
+
+                                async saveUpdateChannel() {
+                                    if (this.savingChannel) return;
+                                    // Optimistically toggle first for instant feedback
+                                    this.allowPrereleases = !this.allowPrereleases;
+                                    this.savingChannel = true;
+                                    try {
+                                        const response = await fetch('{{ route("system.updates.channel") }}', {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                                            },
+                                            body: JSON.stringify({ allow_prereleases: this.allowPrereleases })
+                                        });
+                                        if (response.ok) {
+                                            const label = this.allowPrereleases ? 'Pre-release updates enabled.' : 'Stable updates only.';
+                                            window.showSuccessToast(label + ' Refreshing…');
+                                            await this.checkForUpdates(true);
+                                        } else {
+                                            // Revert on failure
+                                            this.allowPrereleases = !this.allowPrereleases;
+                                            window.showErrorToast('Failed to save update channel.');
+                                        }
+                                    } catch (e) {
+                                        // Revert on failure
+                                        this.allowPrereleases = !this.allowPrereleases;
+                                        window.showErrorToast('An error occurred saving the update channel.');
+                                    } finally {
+                                        this.savingChannel = false;
+                                    }
+                                },
+
+                                async installUpdate() {
+                                    const result = await Swal.fire({
+                                        title: 'Install Update?',
+                                        text: "The system will be unavailable for a few minutes.",
+                                        icon: 'warning',
+                                        showCancelButton: true,
+                                        confirmButtonColor: '#3085d6',
+                                        cancelButtonColor: '#d33',
+                                        confirmButtonText: 'Yes, install it!'
+                                    });
+
+                                    if (!result.isConfirmed) return;
+
+                                    // Optimistic UI update
+                                    this.installing = true;
+                                    this.updateAvailable = false;
+                                    this.message = 'Queueing update...';
+
+                                    // Dispatch global event for app.blade.php to handle
+                                    window.dispatchEvent(new CustomEvent('system-update-install-confirmed'));
+                                },
+                            }
+                        }
+                    </script>
+
+                    <!-- Section: Performance Tuning -->
+                    <div class="card-modern" x-data="performanceTuner()">
+                        <div class="card-header-modern">
+                            <div class="card-icon-wrapper">
+                                <svg class="card-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                                </svg>
+                            </div>
+                            <div class="flex-1">
+                                <h3 class="card-title-modern">Performance Tuning</h3>
+                                <p class="card-subtitle-modern">Optimize worker processes and PHP-FPM based on current hardware.</p>
+                            </div>
+                            <!-- Status badge -->
+                            <div x-show="!loading && status">
+                                <span x-show="!needsTuning"
+                                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                                    Optimized
+                                </span>
+                                <span x-show="needsTuning"
+                                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                                    Tuning Available
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="card-body-modern">
+
+                            <!-- Loading State -->
+                            <template x-if="loading">
+                                <div class="flex items-center justify-center py-8">
+                                    <svg class="animate-spin h-6 w-6 text-indigo-500" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    <span class="ml-3 text-sm text-gray-500 dark:text-gray-400">Detecting hardware...</span>
+                                </div>
+                            </template>
+
+                            <!-- Status Table -->
+                            <template x-if="!loading && status">
+                                <div>
+                                    <!-- Hardware row -->
+                                    <div class="flex gap-6 mb-5 pb-4 border-b border-gray-100 dark:border-gray-700">
+                                        <div class="text-center">
+                                            <div class="text-2xl font-bold text-gray-900 dark:text-white" x-text="status.hardware.cpu_cores"></div>
+                                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">CPU Cores</div>
+                                        </div>
+                                        <div class="text-center">
+                                            <div class="text-2xl font-bold text-gray-900 dark:text-white" x-text="Math.round(status.hardware.total_ram_mb / 1024) + ' GB'"></div>
+                                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">RAM</div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Comparison table -->
+                                    <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 mb-5">
+                                        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                            <thead class="bg-gray-50 dark:bg-gray-800/50">
+                                                <tr>
+                                                    <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Setting</th>
+                                                    <th class="px-4 py-2.5 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Current</th>
+                                                    <th class="px-4 py-2.5 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Recommended</th>
+                                                    <th class="px-4 py-2.5 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
+                                                <template x-for="row in tuningRows" :key="row.key">
+                                                    <tr>
+                                                        <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100" x-text="row.label"></td>
+                                                        <td class="px-4 py-3 text-center text-sm font-mono text-gray-700 dark:text-gray-300" x-text="row.current || '—'"></td>
+                                                        <td class="px-4 py-3 text-center text-sm font-mono font-semibold text-indigo-600 dark:text-indigo-400" x-text="row.recommended"></td>
+                                                        <td class="px-4 py-3 text-center">
+                                                            <span x-show="row.current == row.recommended"
+                                                                class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 dark:bg-green-900/30">
+                                                                <svg class="w-4 h-4 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                                                                </svg>
+                                                            </span>
+                                                            <span x-show="row.current != row.recommended"
+                                                                class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 dark:bg-amber-900/30">
+                                                                <svg class="w-4 h-4 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 3a9 9 0 110 18A9 9 0 0112 3z"/>
+                                                                </svg>
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <!-- Result message -->
+                                    <template x-if="resultMsg">
+                                        <div :class="resultError
+                                                ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700 text-red-800 dark:text-red-200'
+                                                : 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700 text-green-800 dark:text-green-200'"
+                                            class="rounded-lg border p-3 text-sm mb-4" x-text="resultMsg">
+                                        </div>
+                                    </template>
+
+                                    @if(!auth()->user()->isReadOnly())
+                                    <!-- Action buttons -->
+                                    <div class="flex items-center gap-3 pt-4">
+                                        <!-- Preview -->
+                                        <button type="button" @click="preview()"
+                                            :disabled="applying || previewing"
+                                            class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors">
+                                            <svg x-show="previewing" class="animate-spin -ml-0.5 mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            <span x-text="previewing ? 'Analyzing...' : 'Preview Changes'"></span>
+                                        </button>
+
+                                        <!-- Apply -->
+                                        <button type="button" @click="applyTuning()"
+                                            :disabled="applying || previewing || !needsTuning"
+                                            class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                                            <svg x-show="applying" class="animate-spin -ml-0.5 mr-1.5 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            <span x-text="applying ? 'Applying...' : 'Apply Recommended Settings'"></span>
+                                        </button>
+
+                                        <!-- Refresh -->
+                                        <button type="button" @click="loadStatus()"
+                                            :disabled="loading || applying"
+                                            class="ml-auto text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 disabled:opacity-40 transition-colors flex items-center gap-1">
+                                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                            </svg>
+                                            Refresh
+                                        </button>
+                                    </div>
+                                    @endif
+                                </div>
+                            </template>
+
+                            <!-- Preview modal -->
+                            <template x-if="showPreview && previewData">
+                                <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="showPreview = false">
+                                    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+                                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                                            <h3 class="text-base font-semibold text-gray-900 dark:text-white">Proposed Changes</h3>
+                                            <button @click="showPreview = false" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                                                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                            </button>
+                                        </div>
+                                        <div class="px-6 py-4 space-y-3">
+                                            <p class="text-sm text-gray-500 dark:text-gray-400">The following changes will be made to your server configuration:</p>
+                                            <template x-for="row in previewRows" :key="row.label">
+                                                <div x-show="row.current != row.recommended" class="flex items-center justify-between p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
+                                                    <span class="text-sm font-medium text-gray-800 dark:text-gray-200" x-text="row.label"></span>
+                                                    <span class="text-sm">
+                                                        <span class="font-mono text-gray-500 line-through" x-text="row.current"></span>
+                                                        <span class="mx-1 text-gray-400">→</span>
+                                                        <span class="font-mono font-bold text-indigo-600 dark:text-indigo-400" x-text="row.recommended"></span>
+                                                    </span>
+                                                </div>
+                                            </template>
+                                            <p class="text-xs text-gray-400 dark:text-gray-500 pt-1">PHP-FPM and Supervisor worker processes will be restarted. Dashboard may be briefly unavailable (5–10 seconds).</p>
+                                        </div>
+                                        <div class="px-6 py-4 bg-gray-50 dark:bg-gray-800/80 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                                            <button @click="showPreview = false" type="button"
+                                                class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
+                                                Cancel
+                                            </button>
+                                            <button @click="showPreview = false; applyTuning()" type="button"
+                                                class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 border border-transparent rounded-md transition-colors">
+                                                Confirm & Apply
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+
+                        </div>
+                    </div>
+
+                    <script>
+                        function performanceTuner() {
+                            return {
+                                loading: true,
+                                applying: false,
+                                previewing: false,
+                                status: null,
+                                needsTuning: false,
+                                tuningRows: [],
+                                resultMsg: '',
+                                resultError: false,
+                                showPreview: false,
+                                previewData: null,
+                                previewRows: [],
+
+                                init() { this.loadStatus(); },
+
+                                async loadStatus() {
+                                    this.loading = true;
+                                    this.resultMsg = '';
+                                    try {
+                                        const r = await fetch('{{ route("system.tuning.status") }}');
+                                        const d = await r.json();
+                                        this.status = d;
+                                        this.needsTuning = d.needs_tuning;
+                                        this.tuningRows = [
+                                            { key: 'workers', label: 'Queue Workers',    current: d.current.workers,      recommended: d.recommended.workers },
+                                            { key: 'fpm',     label: 'PHP-FPM Children', current: d.current.fpm_children, recommended: d.recommended.fpm_children },
+                                        ];
+                                    } catch(e) {
+                                        console.error('Tuning status fetch failed', e);
+                                    } finally {
+                                        this.loading = false;
+                                    }
+                                },
+
+                                async preview() {
+                                    this.previewing = true;
+                                    this.resultMsg = '';
+                                    try {
+                                        const r = await fetch('{{ route("system.tuning.preview") }}', {
+                                            method: 'POST',
+                                            headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }
+                                        });
+                                        const d = await r.json();
+                                        if (d.success && d.result) {
+                                            this.previewData = d.result;
+                                            this.previewRows = [
+                                                { label: 'Queue Workers',    current: d.result.workers.current,      recommended: d.result.workers.recommended },
+                                                { label: 'PHP-FPM Children', current: d.result.fpm_children.current, recommended: d.result.fpm_children.recommended },
+                                            ];
+                                            this.showPreview = true;
+                                        }
+                                    } catch(e) {
+                                        this.resultMsg = 'Preview failed: ' + e.message;
+                                        this.resultError = true;
+                                    } finally {
+                                        this.previewing = false;
+                                    }
+                                },
+
+                                async applyTuning() {
+                                    const confirmed = await Swal.fire({
+                                        title: 'Apply Performance Tuning?',
+                                        text: 'Worker processes and PHP-FPM will be restarted. The dashboard may be briefly unavailable.',
+                                        icon: 'warning',
+                                        showCancelButton: true,
+                                        confirmButtonColor: '#4f46e5',
+                                        cancelButtonColor: '#6b7280',
+                                        confirmButtonText: 'Yes, apply it!'
+                                    });
+                                    if (!confirmed.isConfirmed) return;
+
+                                    this.applying = true;
+                                    this.resultMsg = '';
+                                    try {
+                                        const r = await fetch('{{ route("system.tuning.apply") }}', {
+                                            method: 'POST',
+                                            headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }
+                                        });
+
+                                        // Handle non-JSON responses (419 CSRF expired, 500 errors, redirects)
+                                        const contentType = r.headers.get('content-type') || '';
+                                        if (!contentType.includes('application/json')) {
+                                            if (r.status === 419) {
+                                                this.resultMsg = 'Session expired — please refresh the page and try again.';
+                                            } else {
+                                                this.resultMsg = 'Server error (HTTP ' + r.status + ') — check Laravel logs for details.';
+                                            }
+                                            this.resultError = true;
+                                            return;
+                                        }
+
+                                        const d = await r.json();
+                                        if (d.success) {
+                                            const errors = d.result && d.result.errors && d.result.errors.length > 0
+                                                ? d.result.errors : [];
+                                            if (errors.length > 0) {
+                                                this.resultMsg = 'Could not apply: ' + errors.join(' | ');
+                                                this.resultError = true;
+                                            } else {
+                                                this.resultMsg = 'Performance tuning applied successfully. Services have been restarted.';
+                                                this.resultError = false;
+                                                await this.loadStatus();
+                                            }
+                                        } else {
+                                            this.resultMsg = 'Error: ' + (d.error || 'Unknown error');
+                                            this.resultError = true;
+                                        }
+                                    } catch(e) {
+                                        this.resultMsg = 'Apply failed: ' + e.message;
+                                        this.resultError = true;
+                                    } finally {
+                                        this.applying = false;
+                                    }
+                                }
+                            };
+                        }
+                    </script>
+
+                    <!-- Section: System Backups -->
+
+                    <div class="card-modern">
+                        <div class="card-header-modern">
+                            <div class="card-icon-wrapper">
+                                <svg class="card-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="card-title-modern">System Backups</h3>
+                                <p class="card-subtitle-modern">Manage system configuration backups and restoration.</p>
+                            </div>
+                        </div>
+                        <div class="card-body-modern">
+                            <div class="flex items-center justify-between">
+                                <div class="text-sm text-gray-500 dark:text-gray-400">
+                                    Create encrypted backups of your system configuration, tenants, and users.
+                                </div>
+                                <a href="{{ route('system.backups.index') }}"
+                                    class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                    Manage Backups &rarr;
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Configuration Tab Content -->
+                <div x-show="activeTab === 'configuration'" x-transition:enter="transition ease-out duration-200"
+                    x-transition:enter-start="opacity-0 translate-y-2"
+                    x-transition:enter-end="opacity-100 translate-y-0">
+
+                    <!-- Section: Dashboard Defaults -->
+                    <div class="card-modern mb-6">
+                        <div class="card-header-modern">
+                            <div class="card-icon-wrapper">
+                                <svg class="card-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="card-title-modern">Dashboard Defaults</h3>
+                                <p class="card-subtitle-modern">Set the default firewall grid layout for new users or devices that haven't chosen a preference yet. Individual users can always override this locally.</p>
+                            </div>
+                        </div>
+                        <div class="card-body-modern">
+                            <div class="space-y-3">
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Default Dashboard Layout</label>
+                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3" x-data="{ layout: '{{ $settings['dashboard_default_layout'] ?? 'cards' }}' }">
+                                    {{-- Cards option --}}
+                                    <label class="relative flex cursor-pointer rounded-xl border-2 p-4 transition-all duration-150"
+                                        :class="layout === 'cards' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-600 bg-white dark:bg-gray-800'">
+                                        <input type="radio" name="dashboard_default_layout" value="cards"
+                                            class="sr-only" @change="layout = 'cards'"
+                                            {{ ($settings['dashboard_default_layout'] ?? 'cards') === 'cards' ? 'checked' : '' }}>
+                                        <div class="flex items-start gap-3 w-full">
+                                            <div class="shrink-0 mt-0.5">
+                                                <svg class="w-5 h-5 transition-colors" :class="layout === 'cards' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'"
+                                                     fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                                    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                                                </svg>
+                                            </div>
+                                            <div class="min-w-0">
+                                                <p class="text-sm font-semibold transition-colors" :class="layout === 'cards' ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-900 dark:text-gray-100'">Cards</p>
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Full detail view with metrics, graphs, and system info. Best for ≤ 20 firewalls.</p>
+                                            </div>
+                                        </div>
+                                    </label>
+
+                                    {{-- Compact option --}}
+                                    <label class="relative flex cursor-pointer rounded-xl border-2 p-4 transition-all duration-150"
+                                        :class="layout === 'compact' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-600 bg-white dark:bg-gray-800'">
+                                        <input type="radio" name="dashboard_default_layout" value="compact"
+                                            class="sr-only" @change="layout = 'compact'"
+                                            {{ ($settings['dashboard_default_layout'] ?? 'cards') === 'compact' ? 'checked' : '' }}>
+                                        <div class="flex items-start gap-3 w-full">
+                                            <div class="shrink-0 mt-0.5">
+                                                <svg class="w-5 h-5 transition-colors" :class="layout === 'compact' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'"
+                                                     fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                                    <rect x="3" y="3" width="4" height="4" rx="0.5"/><rect x="10" y="3" width="4" height="4" rx="0.5"/><rect x="17" y="3" width="4" height="4" rx="0.5"/><rect x="3" y="10" width="4" height="4" rx="0.5"/><rect x="10" y="10" width="4" height="4" rx="0.5"/><rect x="17" y="10" width="4" height="4" rx="0.5"/><rect x="3" y="17" width="4" height="4" rx="0.5"/><rect x="10" y="17" width="4" height="4" rx="0.5"/><rect x="17" y="17" width="4" height="4" rx="0.5"/>
+                                                </svg>
+                                            </div>
+                                            <div class="min-w-0">
+                                                <p class="text-sm font-semibold transition-colors" :class="layout === 'compact' ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-900 dark:text-gray-100'">Compact</p>
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Dense 3–4 column grid with key metrics only. Ideal for 20–200 firewalls.</p>
+                                            </div>
+                                        </div>
+                                    </label>
+
+                                    {{-- List option --}}
+                                    <label class="relative flex cursor-pointer rounded-xl border-2 p-4 transition-all duration-150"
+                                        :class="layout === 'list' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-600 bg-white dark:bg-gray-800'">
+                                        <input type="radio" name="dashboard_default_layout" value="list"
+                                            class="sr-only" @change="layout = 'list'"
+                                            {{ ($settings['dashboard_default_layout'] ?? 'cards') === 'list' ? 'checked' : '' }}>
+                                        <div class="flex items-start gap-3 w-full">
+                                            <div class="shrink-0 mt-0.5">
+                                                <svg class="w-5 h-5 transition-colors" :class="layout === 'list' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'"
+                                                     fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                                    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                                                </svg>
+                                            </div>
+                                            <div class="min-w-0">
+                                                <p class="text-sm font-semibold transition-colors" :class="layout === 'list' ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-900 dark:text-gray-100'">List</p>
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Single row per firewall — maximum density. Best for 200+ firewalls.</p>
+                                            </div>
+                                        </div>
+                                    </label>
+                                </div>
+                                <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                                    Users who have already selected their own layout preference will not be affected by this setting.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 1: Branding & Identity -->
+                    <div class="card-modern">
+                        <div class="card-header-modern">
+                            <div class="card-icon-wrapper">
+                                <svg class="card-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="card-title-modern">Branding & Identity</h3>
+                                <p class="card-subtitle-modern">Customize the look and feel of your application.</p>
+                            </div>
+                        </div>
+                        <div class="card-body-modern grid grid-cols-1 md:grid-cols-2 gap-6 space-y-0">
+
+                            <!-- Logo Upload -->
+                            <div class="col-span-1">
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Custom
+                                    Logo
+                                    (Top Left)</label>
+                                <div
+                                    class="flex items-center gap-4 p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+                                    @if(isset($settings['logo_path']))
+                                        <div class="shrink-0 relative group">
+                                            <img src="{{ $settings['logo_path'] }}" alt="Logo"
+                                                class="h-12 w-auto object-contain p-1 rounded bg-gray-200 dark:bg-gray-700"
+                                                :style="'background-color: ' + sidebarBg">
+                                            <button type="button" onclick="restoreDefault('logo')"
+                                                class="absolute -top-2 -right-2 bg-red-100 text-red-600 rounded-full p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                                                title="Restore Default">
+                                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                        d="M6 18L18 6M6 6l12 12"></path>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    @else
+                                        <div
+                                            class="h-12 w-12 bg-gray-200 dark:bg-gray-600 rounded flex items-center justify-center text-gray-400">
+                                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z">
+                                                </path>
+                                            </svg>
+                                        </div>
+                                    @endif
+                                    <div class="flex-1" x-data="{ fileName: null }">
+                                        <input type="file" name="logo" id="logo" class="hidden" x-ref="logoInput"
+                                            accept="image/*"
+                                            @change="fileName = $refs.logoInput.files[0] ? $refs.logoInput.files[0].name : null">
+                                        <button type="button" @click="$refs.logoInput.click()"
+                                            class="inline-flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                            Change Logo
+                                        </button>
+                                        <p x-show="fileName" x-text="fileName"
+                                            class="mt-1 text-xs text-indigo-600 dark:text-indigo-400 truncate"></p>
+                                        <p x-show="!fileName" class="mt-1 text-xs text-gray-500">PNG, JPG, SVG up to 2MB
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Favicon Upload -->
+                            <div class="col-span-1">
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Custom
+                                    Favicon</label>
+                                <div
+                                    class="flex items-center gap-4 p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+                                    @if(isset($settings['favicon_path']))
+                                        <div class="shrink-0 relative group">
+                                            <img src="{{ $settings['favicon_path'] }}" alt="Favicon"
+                                                class="h-10 w-10 object-contain p-1 rounded bg-white border border-gray-200">
+                                            <button type="button" onclick="restoreDefault('favicon')"
+                                                class="absolute -top-2 -right-2 bg-red-100 text-red-600 rounded-full p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                                                title="Restore Default">
+                                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                        d="M6 18L18 6M6 6l12 12"></path>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    @else
+                                        <div
+                                            class="h-10 w-10 bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center text-gray-400">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1">
+                                                </path>
+                                            </svg>
+                                        </div>
+                                    @endif
+                                    <div class="flex-1" x-data="{ fileName: null }">
+                                        <input type="file" name="favicon" id="favicon" class="hidden" x-ref="favInput"
+                                            accept=".ico,.png"
+                                            @change="fileName = $refs.favInput.files[0] ? $refs.favInput.files[0].name : null">
+                                        <button type="button" @click="$refs.favInput.click()"
+                                            class="inline-flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                            Change Favicon
+                                        </button>
+                                        <p x-show="fileName" x-text="fileName"
+                                            class="mt-1 text-xs text-indigo-600 dark:text-indigo-400 truncate"></p>
+                                        <p x-show="!fileName" class="mt-1 text-xs text-gray-500">ICO, PNG up to 1MB</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Interface Customization -->
+                    <!-- Section 2: Interface Customization -->
+                    <div class="card-modern">
+                        <div class="card-header-modern">
+                            <div class="card-icon-wrapper">
+                                <svg class="card-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="card-title-modern">Interface Customization</h3>
+                                <p class="card-subtitle-modern">Manage themes and white-labeling colors.</p>
+                            </div>
+                        </div>
+                        <div class="card-body-modern">
+
+                            <!-- Theme Selection -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">System
+                                    Theme</label>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
+                                    <!-- Light Mode -->
+                                    <label class="relative cursor-pointer group">
+                                        <input type="radio" name="theme" value="light" class="peer sr-only" {{ ($settings['theme'] ?? 'light') === 'light' ? 'checked' : '' }}>
+                                        <div
+                                            class="p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 bg-white hover:border-indigo-300 peer-checked:border-indigo-600 peer-checked:bg-indigo-50 transition-all peer-checked:[&_.radio-circle]:bg-indigo-600 peer-checked:[&_.radio-circle]:border-indigo-600 peer-checked:[&_.radio-dot]:opacity-100">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center gap-3">
+                                                    <div class="p-2 rounded-full bg-gray-100 text-yellow-500">
+                                                        <svg class="w-6 h-6" fill="none" stroke="currentColor"
+                                                            viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                                stroke-width="2"
+                                                                d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z">
+                                                            </path>
+                                                        </svg>
+                                                    </div>
+                                                    <span class="font-medium text-gray-900">Light Mode</span>
+                                                </div>
+                                                <!-- Radio Circle -->
+                                                <div
+                                                    class="radio-circle w-5 h-5 rounded-full border border-gray-300 bg-white flex items-center justify-center transition-all">
+                                                    <div
+                                                        class="radio-dot w-2 h-2 rounded-full bg-white opacity-0 transition-opacity">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <!-- Dark Mode -->
+                                    <label class="relative cursor-pointer group">
+                                        <input type="radio" name="theme" value="dark" class="peer sr-only" {{ ($settings['theme'] ?? 'light') === 'dark' ? 'checked' : '' }}>
+                                        <div
+                                            class="p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 bg-gray-800 hover:border-indigo-300 peer-checked:border-indigo-600 peer-checked:bg-gray-800 transition-all peer-checked:[&_.radio-circle]:bg-indigo-600 peer-checked:[&_.radio-circle]:border-indigo-600 peer-checked:[&_.radio-dot]:opacity-100">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center gap-3">
+                                                    <div class="p-2 rounded-full bg-gray-700 text-blue-300">
+                                                        <svg class="w-6 h-6" fill="none" stroke="currentColor"
+                                                            viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                                stroke-width="2"
+                                                                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z">
+                                                            </path>
+                                                        </svg>
+                                                    </div>
+                                                    <span class="font-medium text-white">Dark Mode</span>
+                                                </div>
+                                                <!-- Radio Circle -->
+                                                <div
+                                                    class="radio-circle w-5 h-5 rounded-full border border-gray-300 bg-white flex items-center justify-center transition-all">
+                                                    <div
+                                                        class="radio-dot w-2 h-2 rounded-full bg-white opacity-0 transition-opacity">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Sidebar Customization -->
+                            <div class="pt-6 border-t border-gray-200 dark:border-gray-700">
+                                <h4 class="text-base font-medium text-gray-900 dark:text-gray-100 mb-4">Sidebar
+                                    Appearance
+                                    (White Labeling)</h4>
+
+                                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                    <div class="space-y-4">
+                                        <label
+                                            class="block text-sm font-medium text-gray-700 dark:text-gray-300">Background
+                                            Color</label>
+                                        <div class="flex items-center gap-3">
+                                            <input type="color" x-model="sidebarBg" name="sidebar_bg"
+                                                class="h-10 w-16 p-0 border-0 rounded cursor-pointer shadow-sm shrink-0">
+                                            <input type="text" x-model="sidebarBg"
+                                                class="uppercase flex-1 rounded-md border-gray-300 shadow-sm sm:text-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                        </div>
+                                    </div>
+                                    <div class="space-y-4">
+                                        <label for="sidebar_text"
+                                            class="block text-sm font-medium text-gray-700 dark:text-gray-300">Text
+                                            Color</label>
+                                        <div class="flex items-center gap-3">
+                                            <!-- Color Swatch -->
+                                            <input type="color" x-model="sidebarText" name="sidebar_text"
+                                                id="sidebar_text"
+                                                class="h-10 w-16 p-0 border-0 rounded cursor-pointer shadow-sm shrink-0">
+
+                                            <!-- Hex Input -->
+                                            <input type="text" x-model="sidebarText"
+                                                class="uppercase flex-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+
+                                            <!-- Auto-Detect Button -->
+                                            <button type="button" @click="sidebarText = recommendedText()"
+                                                class="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                                                title="Auto-detect best contrast color">
+                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"
+                                                    fill="currentColor" class="w-4 h-4 text-indigo-500">
+                                                    <path
+                                                        d="M15.98 1.804a1 1 0 00-1.96 0l-.24 1.192a1 1 0 01-.784.785l-1.192.238a1 1 0 000 1.96l1.192.238a1 1 0 01.785.785l.238 1.192a1 1 0 001.96 0l.238-1.192a1 1 0 01.785-.785l1.192-.238a1 1 0 000-1.96l-1.192-.238a1 1 0 01-.785-.785l-.238-1.192zM6.949 5.684a1 1 0 00-1.898 0l-.683 2.051a1 1 0 01-.633.633l-2.051.683a1 1 0 000 1.898l2.051.683a1 1 0 01.633.633l.683 2.051a1 1 0 001.898 0l.683-2.051a1 1 0 01.633-.633l2.051-.683a1 1 0 000-1.898l-2.051-.683a1 1 0 01-.633-.633L6.95 5.684zM13.949 13.684a1 1 0 00-1.898 0l-.184.551a1 1 0 01-.632.633l-.551.183a1 1 0 000 1.898l.551.183a1 1 0 01.633.633l.183.551a1 1 0 001.898 0l.184-.551a1 1 0 01.632-.633l.551-.183a1 1 0 000-1.898l-.551-.184a1 1 0 01-.633-.632l-.183-.551z" />
+                                                </svg>
+                                                <span class="hidden xl:inline">Auto</span>
+                                            </button>
+                                        </div>
+                                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Click Auto to pick the
+                                            best
+                                            text color for contrast.</p>
+                                    </div>
+
+                                    <!-- Live Preview -->
+                                    <div class="lg:col-span-1">
+                                        <div class="flex justify-between items-center mb-2">
+                                            <label
+                                                class="block text-sm font-medium text-gray-700 dark:text-gray-300">Live
+                                                Preview</label>
+                                            <button type="button"
+                                                @click="sidebarBg = '#0E2238'; sidebarText = '#CBD5E1'"
+                                                class="text-xs font-medium text-indigo-600 hover:text-indigo-500 hover:underline dark:text-indigo-400 dark:hover:text-indigo-300">
+                                                Reset to Default
+                                            </button>
+                                        </div>
+                                        <div class="h-24 w-full rounded-lg shadow-inner flex flex-col justify-center px-4 transition-colors duration-200 border border-gray-200 dark:border-gray-700"
+                                            :style="'background-color: ' + sidebarBg">
+                                            <div class="flex items-center gap-2 mb-2" :style="'color: ' + sidebarText">
+                                                <div class="w-2 h-2 rounded-full"
+                                                    :style="'background-color: ' + sidebarText">
+                                                </div>
+                                                <span class="text-sm font-medium opacity-100">Dashboard</span>
+                                            </div>
+                                            <div class="flex items-center gap-2" :style="'color: ' + sidebarText">
+                                                <div class="w-2 h-2 rounded-full opacity-50"
+                                                    :style="'background-color: ' + sidebarText"></div>
+                                                <span class="text-sm font-medium opacity-75">Firewalls</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- Section: Site Configuration -->
+                    <!-- Section: Site Configuration -->
+                    <div class="card-modern" x-data="sslInstaller()">
+                        <div class="card-header-modern">
+                            <div class="card-icon-wrapper">
+                                <svg class="card-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="card-title-modern">Site Configuration</h3>
+                                <p class="card-subtitle-modern">Manage your primary application URL and security
+                                    settings.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="card-body-modern">
+                            <div class="grid grid-cols-1 gap-8">
+                                <!-- Hostname & Protocol -->
+                                <div>
+                                    <label
+                                        class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Primary
+                                        Site URL</label>
+                                    <div
+                                        class="relative flex items-stretch rounded-xl shadow-sm border border-gray-300 dark:border-gray-700 focus-within:border-indigo-600 focus-within:ring-1 focus-within:ring-indigo-600 overflow-hidden">
+                                        <div
+                                            class="flex flex-shrink-0 items-center bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 px-3">
+                                            <span class="text-gray-500 sm:text-sm font-medium">
+                                                {{ $settings['site_protocol'] ?? 'http' }}://
+                                            </span>
+                                            <input type="hidden" name="site_protocol"
+                                                value="{{ $settings['site_protocol'] ?? 'http' }}">
+                                        </div>
+                                        <input type="text" name="site_url" value="{{ $settings['site_url'] ?? '' }}"
+                                            placeholder="central.example.com"
+                                            class="block flex-1 border-0 bg-transparent py-2.5 pl-3 text-gray-900 dark:text-white placeholder:text-gray-400 focus:ring-0 sm:text-sm sm:leading-6">
+                                        <div class="flex-shrink-0">
+                                            <button type="button" id="verifyDomainBtn"
+                                                onclick="verifyReachabilityOnly()"
+                                                class="inline-flex items-center gap-x-2 px-4 py-2.5 text-sm font-semibold text-indigo-600 bg-transparent dark:bg-transparent hover:bg-indigo-50 dark:hover:bg-gray-700 transition-colors h-full rounded-r-xl">
+                                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24"
+                                                    stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                Verify
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <p class="mt-2 text-xs text-red-500 dark:text-red-400 flex items-start gap-1">
+                                        <svg class="h-4 w-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24"
+                                            stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                        <span>Changing this will update Nginx configurations. Ensure the hostname is
+                                            resolvable.</span>
+                                    </p>
+                                </div>
+
+                                <!-- SSL Upgrade -->
+                                @if(($settings['site_protocol'] ?? 'http') === 'http')
+                                    <div
+                                        class="rounded-md bg-yellow-50 dark:bg-yellow-900/30 p-4 border border-yellow-200 dark:border-yellow-700/50">
+                                        <div class="flex">
+                                            <div class="flex-shrink-0">
+                                                <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor"
+                                                    aria-hidden="true">
+                                                    <path fill-rule="evenodd"
+                                                        d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                                                        clip-rule="evenodd" />
+                                                </svg>
+                                            </div>
+                                            <div class="ml-3 flex-1 md:flex md:justify-between">
+                                                <p class="text-sm text-yellow-700 dark:text-yellow-300">
+                                                    <span class="font-medium">Connection Not Secure.</span>
+                                                    PFCentral recommends using HTTPS. You can automatically provision a
+                                                    free
+                                                    Let's Encrypt SSL certificate.
+                                                </p>
+                                                <p class="mt-3 text-sm md:ml-6 md:mt-0">
+                                                    <button type="button"
+                                                        @click="openModal({{ Js::from($settings['site_url'] ?? '') }})"
+                                                        class="whitespace-nowrap font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 hover:underline">
+                                                        Install SSL Certificate
+                                                        <span aria-hidden="true"> &rarr;</span>
+                                                    </button>
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                @elseif(($settings['site_protocol'] ?? 'http') === 'https')
+                                    <div
+                                        class="rounded-md bg-green-50 dark:bg-green-900/30 p-4 border border-green-200 dark:border-green-700/50">
+                                        <div class="flex">
+                                            <div class="flex-shrink-0">
+                                                <svg class="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor"
+                                                    aria-hidden="true">
+                                                    <path fill-rule="evenodd"
+                                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                                        clip-rule="evenodd" />
+                                                </svg>
+                                            </div>
+                                            <div class="ml-3 flex-1 md:flex md:justify-between md:items-center">
+                                                <p class="text-sm text-green-700 dark:text-green-300">
+                                                    <span class="font-medium">Secure Connection.</span>
+                                                    SSL is installed and active.
+                                                </p>
+                                                <p class="mt-3 text-sm md:ml-6 md:mt-0 flex items-center gap-4">
+                                                    <button type="button"
+                                                        @click="openModal({{ Js::from($settings['site_url'] ?? '') }})"
+                                                        class="whitespace-nowrap font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 hover:underline">
+                                                        Reconfigure
+                                                    </button>
+                                                    <button type="button" @click="confirmUninstall()"
+                                                        class="whitespace-nowrap font-medium text-red-600 dark:text-red-400 hover:text-red-500 hover:underline">
+                                                        Uninstall SSL
+                                                    </button>
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                @endif
+                            </div>
+                        </div>
+
+                        <!-- SSL Modal -->
+                        <x-modal name="install-ssl-modal" :show="$errors->isNotEmpty()" focusable maxWidth="lg">
+                            <div class="p-6">
+                                <h3 class="text-lg font-medium leading-6 text-gray-900 dark:text-white mb-1">Install Let's Encrypt SSL</h3>
+                                <p class="text-sm text-gray-500 dark:text-gray-400 mb-5">Certificate is issued free via Let's Encrypt. Choose how your domain ownership is verified.</p>
+
+                                <div class="space-y-5">
+                                    <!-- Domain -->
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Domain Name</label>
+                                        <input type="text" x-model="domain"
+                                            class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                            placeholder="central.example.com">
+                                    </div>
+
+                                    <!-- Email -->
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address <span class="font-normal text-gray-400">(for renewal notices)</span></label>
+                                        <input type="email" x-model="email"
+                                            class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                            placeholder="admin@example.com">
+                                    </div>
+
+                                    <!-- Verification Method -->
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Verification Method</label>
+                                        <div class="grid grid-cols-2 gap-3">
+                                            <!-- HTTP option -->
+                                            <label class="relative cursor-pointer">
+                                                <input type="radio" x-model="challengeMethod" value="http" class="peer sr-only">
+                                                <div class="flex flex-col gap-1 p-3 rounded-lg border-2 border-gray-200 dark:border-gray-600 hover:border-indigo-300 dark:hover:border-indigo-500 peer-checked:border-indigo-600 peer-checked:bg-indigo-50 dark:peer-checked:bg-indigo-900/30 transition-all cursor-pointer">
+                                                    <div class="flex items-center gap-2">
+                                                        <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+                                                        <span class="text-sm font-medium text-gray-900 dark:text-white">HTTP Verification</span>
+                                                    </div>
+                                                    <p class="text-xs text-gray-500 dark:text-gray-400 pl-6">Port 80 must be open and reachable</p>
+                                                </div>
+                                            </label>
+                                            <!-- Cloudflare DNS option -->
+                                            <label class="relative cursor-pointer">
+                                                <input type="radio" x-model="challengeMethod" value="cloudflare" class="peer sr-only">
+                                                <div class="flex flex-col gap-1 p-3 rounded-lg border-2 border-gray-200 dark:border-gray-600 hover:border-orange-300 dark:hover:border-orange-500 peer-checked:border-orange-500 peer-checked:bg-orange-50 dark:peer-checked:bg-orange-900/20 transition-all cursor-pointer">
+                                                    <div class="flex items-center gap-2">
+                                                        <svg class="w-4 h-4 text-orange-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>
+                                                        <span class="text-sm font-medium text-gray-900 dark:text-white">Cloudflare DNS</span>
+                                                    </div>
+                                                    <p class="text-xs text-gray-500 dark:text-gray-400 pl-6">No port 80 needed &mdash; works with proxied domains</p>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <!-- Re-issue warning (shown when SSL is active and method changes) -->
+                                        <div x-show="sslActive && statusLoaded && challengeMethod !== savedChallengeMethod"
+                                            class="mt-2 flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-md p-2.5">
+                                            <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                            <span>Changing the verification method will <strong>re-issue your certificate</strong>. There will be a brief reload during the switchover.</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Cloudflare Fields -->
+                                    <div x-show="challengeMethod === 'cloudflare'" class="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                        <!-- API Token -->
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                                Cloudflare API Token
+                                                <span class="ml-1 text-xs font-normal text-gray-400">(write-only)</span>
+                                            </label>
+                                            <input type="password" x-model="cfToken" autocomplete="new-password"
+                                                class="block w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white font-mono"
+                                                placeholder="Enter API token">
+                                            <!-- Token configured hint -->
+                                            <p x-show="cfTokenConfigured && !cfToken"
+                                                class="mt-1.5 text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
+                                                Token already configured &mdash; leave blank to keep, or type a new value to replace
+                                            </p>
+                                            <p x-show="!cfTokenConfigured"
+                                                class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                                                Requires <strong>Zone &rarr; DNS &rarr; Edit</strong> permission. Token is encrypted before storage and never retrievable.
+                                            </p>
+                                        </div>
+
+                                        <!-- Zone ID -->
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Zone ID</label>
+                                            <input type="text" x-model="cfZoneId"
+                                                class="block w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white font-mono"
+                                                placeholder="e.g. a1b2c3d4e5f6...  (32 hex chars)">
+                                            <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                                                Found in Cloudflare Dashboard &rarr; your domain &rarr; Overview &rarr; API section.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Privilege wrappers not installed warning -->
+                                    <div x-show="statusLoaded && !wrappersInstalled"
+                                        class="flex items-start gap-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 p-3.5">
+                                        <svg class="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                        </svg>
+                                        <div class="text-sm text-amber-800 dark:text-amber-300">
+                                            <p class="font-semibold mb-1">Server setup required before SSL can be installed</p>
+                                            <p class="text-xs mb-2">The SSL privilege wrappers are not installed. This is a one-time server step that requires root access — it cannot be done automatically by the app. SSH into your server and run:</p>
+                                            <code class="block text-xs font-mono bg-amber-100 dark:bg-amber-900/50 rounded px-2 py-1.5 select-all break-all">
+                                                sudo bash /var/www/pfcentral/scripts/setup-ssl-permissions.sh
+                                            </code>
+                                            <p class="text-xs mt-2 text-amber-700 dark:text-amber-400">After running the command, close and re-open this dialog to continue.</p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Error Message -->
+                                    <div x-show="error" class="flex items-start gap-2 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-md p-3">
+                                        <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                        <span x-text="error"></span>
+                                    </div>
+                                </div>
+
+                                <div class="mt-6 flex justify-end gap-3">
+                                    <button type="button" x-on:click="$dispatch('close')"
+                                        class="rounded-md bg-white dark:bg-gray-700 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600">Cancel</button>
+                                    <button type="button" @click="installSsl" :disabled="loading || !wrappersInstalled"
+                                        :title="!wrappersInstalled ? 'Run setup-ssl-permissions.sh on the server first' : ''"
+                                        class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                                        <svg x-show="loading" class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        <span x-text="loading ? 'Installing...' : 'Install Certificate'"></span>
+                                    </button>
+                                </div>
+                            </div>
+                        </x-modal>
+                    </div>
+
+                    <!-- Section: Email Configuration -->
+                    <div class="card-modern">
+                        <div class="card-header-modern">
+                            <div class="card-icon-wrapper">
+                                <svg class="card-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="card-title-modern">Email Configuration</h3>
+                                <p class="card-subtitle-modern">Configure email delivery settings for notifications and
+                                    magic logins.</p>
+                            </div>
+                        </div>
+                        <div class="card-body-modern space-y-6"
+                            x-data="{ driver: '{{ $settings['mail_driver'] ?? 'log' }}' }">
+
+                            <!-- Driver Selection -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Mail
+                                    Driver</label>
+                                <select name="mail_driver" x-model="driver"
+                                    class="mt-1 block w-full rounded-md border-gray-300 py-2 pl-3 pr-10 text-base focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                    <option value="log">Local Logging (No Email Sent)</option>
+                                    <option value="mailgun">Mailgun (Recommended)</option>
+                                    <option value="mandrill">Mandrill (Mailchimp Transactional)</option>
+                                </select>
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Use Mailgun or Mandrill in
+                                    production. Save the settings before sending a test email.</p>
+                            </div>
+
+                            <!-- Provider Settings -->
+                            <div x-show="driver !== 'log'"
+                                class="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                <!-- Mandrill Specific Settings -->
+                                <div x-show="driver === 'mandrill'" class="mb-6">
+                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Mandrill
+                                        API Key{{ !empty($settings['mandrill_secret']) ? ' (saved — leave blank to keep it)' : '' }}</label>
+                                    <input type="password" name="mandrill_secret" value="" autocomplete="new-password"
+                                        placeholder="{{ !empty($settings['mandrill_secret']) ? '••••••••••••••••' : 'md-xxxxxxxxxxxxxxxxxxxx' }}"
+                                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Mailchimp Transactional
+                                        (mandrillapp.com) → Settings → SMTP &amp; API Info → New API Key. The From
+                                        Address must be on a sending domain verified in Mandrill (SPF/DKIM). The key is
+                                        stored encrypted.</p>
+                                </div>
+
+                                <!-- Mailgun Specific Settings -->
+                                <div x-show="driver === 'mailgun'" class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                    <!-- Domain -->
+                                    <div>
+                                        <label
+                                            class="block text-sm font-medium text-gray-700 dark:text-gray-300">Mailgun
+                                            Domain</label>
+                                        <input type="text" name="mailgun_domain"
+                                            value="{{ $settings['mailgun_domain'] ?? '' }}"
+                                            placeholder="mg.yourdomain.com"
+                                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                    </div>
+
+                                    <!-- Secret -->
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">API
+                                            Key (Secret)</label>
+                                        <input type="password" name="mailgun_secret" value="" autocomplete="new-password"
+                                            placeholder="{{ !empty($settings['mailgun_secret']) ? 'saved — leave blank to keep it' : 'key-xxxxxxxxxxxxxxxx' }}"
+                                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                    </div>
+
+                                    <!-- Region/Endpoint -->
+                                    <div class="col-span-1 md:col-span-2">
+                                        <label
+                                            class="block text-sm font-medium text-gray-700 dark:text-gray-300">Mailgun
+                                            Region</label>
+                                        <select name="mailgun_endpoint"
+                                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                            <option value="api.mailgun.net" {{ ($settings['mailgun_endpoint'] ?? 'api.mailgun.net') === 'api.mailgun.net' ? 'selected' : '' }}>US
+                                                (api.mailgun.net)</option>
+                                            <option value="api.eu.mailgun.net" {{ ($settings['mailgun_endpoint'] ?? '') === 'api.eu.mailgun.net' ? 'selected' : '' }}>EU (api.eu.mailgun.net)
+                                            </option>
+                                        </select>
+                                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Select EU if your
+                                            Mailgun
+                                            domain is in the European region.</p>
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <!-- From Address -->
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">From
+                                            Address</label>
+                                        <input type="email" name="mail_from_address"
+                                            value="{{ $settings['mail_from_address'] ?? 'hello@example.com' }}"
+                                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                    </div>
+
+                                    <!-- From Name -->
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">From
+                                            Name</label>
+                                        <input type="text" name="mail_from_name"
+                                            value="{{ $settings['mail_from_name'] ?? config('app.name') }}"
+                                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                    </div>
+                                </div>
+
+                                <div class="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700"
+                                    x-data="emailTester()">
+                                    <h4 class="text-sm font-medium text-gray-900 dark:text-white mb-4">Test
+                                        Configuration
+                                    </h4>
+                                    <div class="flex gap-4 items-end">
+                                        <div class="flex-1">
+                                            <label
+                                                class="block text-sm font-medium text-gray-700 dark:text-gray-300">Send
+                                                Test Email To</label>
+                                            <input type="email" x-model="testEmail" placeholder="your@email.com"
+                                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                        </div>
+                                        <button type="button" @click="sendTestEmail" :disabled="loading"
+                                            class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50">
+                                            <span x-show="!loading">Send Test Email</span>
+                                            <span x-show="loading">Sending...</span>
+                                        </button>
+                                    </div>
+                                    <!-- Feedback Messages -->
+                                    <div x-show="successMessage" x-transition
+                                        class="mt-4 p-3 rounded-md bg-green-50 text-green-700 dark:bg-green-900/50 dark:text-green-300">
+                                        <p x-text="successMessage"></p>
+                                    </div>
+                                    <div x-show="errorMessage" x-transition
+                                        class="mt-4 p-3 rounded-md bg-red-50 text-red-700 dark:bg-red-900/50 dark:text-red-300">
+                                        <p x-text="errorMessage"></p>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <script>
+                        function emailTester() {
+                            return {
+                                testEmail: '{{ auth()->user()->email }}',
+                                loading: false,
+                                successMessage: null,
+                                errorMessage: null,
+                                async sendTestEmail() {
+                                    if (!this.testEmail) {
+                                        this.errorMessage = 'Please enter an email address.';
+                                        return;
+                                    }
+                                    this.loading = true;
+                                    this.errorMessage = null;
+                                    this.successMessage = null;
+
+                                    try {
+                                        const response = await fetch('{{ route("system.settings.test-email") }}', {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                                            },
+                                            body: JSON.stringify({ test_email: this.testEmail })
+                                        });
+
+                                        const data = await response.json();
+
+                                        if (data.success) {
+                                            this.successMessage = data.message;
+                                        } else {
+                                            this.errorMessage = data.message || 'Failed to send test email.';
+                                        }
+                                    } catch (e) {
+                                        this.errorMessage = 'An error occurred while sending the email.';
+                                    } finally {
+                                        this.loading = false;
+                                    }
+                                }
+                            }
+                        }
+
+                        function sslInstaller() {
+                            return {
+                                showModal: false,
+                                domain: '',
+                                email: '',
+                                // Challenge method state
+                                challengeMethod: 'http',
+                                savedChallengeMethod: 'http', // from DB — used to detect change
+                                cfToken: '',                   // never pre-filled — write-only
+                                cfZoneId: '',
+                                cfTokenConfigured: false,
+                                sslActive: false,
+                                wrappersInstalled: true,       // assume ok until status loaded
+                                statusLoaded: false,
+                                loading: false,
+                                error: null,
+
+                                async openModal(currentUrl) {
+                                    this.domain = currentUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+                                    this.error = null;
+                                    this.cfToken = '';           // always blank on open — write-only
+                                    this.statusLoaded = false;
+
+                                    // Fetch non-sensitive SSL status to hydrate modal fields
+                                    try {
+                                        const res = await fetch('{{ route("system.ssl.status") }}', {
+                                            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                                        });
+                                        const s = await res.json();
+                                        this.challengeMethod      = s.challenge_method   || 'http';
+                                        this.savedChallengeMethod = s.challenge_method   || 'http';
+                                        this.cfTokenConfigured    = !!s.cf_token_configured;
+                                        this.cfZoneId             = s.cf_zone_id         || '';
+                                        this.sslActive            = !!s.ssl_active;
+                                        this.wrappersInstalled    = s.ssl_wrappers_installed !== false;
+                                        if (s.ssl_email)          this.email = s.ssl_email;
+                                    } catch (_) {
+                                        // Non-fatal — defaults remain
+                                    }
+
+                                    this.statusLoaded = true;
+                                    window.dispatchEvent(new CustomEvent('open-modal', { detail: 'install-ssl-modal' }));
+                                },
+
+                                async installSsl() {
+                                    if (!this.domain || !this.email) {
+                                        this.error = 'Please fill in all fields.';
+                                        return;
+                                    }
+
+                                    // Cloudflare-specific validation
+                                    if (this.challengeMethod === 'cloudflare') {
+                                        if (!this.cfZoneId || !/^[a-f0-9]{32}$/.test(this.cfZoneId.trim())) {
+                                            this.error = 'Please enter a valid Cloudflare Zone ID (32-character hex string).';
+                                            return;
+                                        }
+                                        if (!this.cfToken && !this.cfTokenConfigured) {
+                                            this.error = 'A Cloudflare API Token is required.';
+                                            return;
+                                        }
+                                    }
+
+                                    this.loading = true;
+                                    this.error = null;
+
+                                    try {
+                                        // Build payload — only include CF fields when needed
+                                        const body = {
+                                            domain: this.domain,
+                                            email: this.email,
+                                            challenge_method: this.challengeMethod,
+                                        };
+
+                                        if (this.challengeMethod === 'cloudflare') {
+                                            body.cf_zone_id = this.cfZoneId.trim();
+                                            // Only send token if user entered a new one
+                                            if (this.cfToken) {
+                                                body.cf_token = this.cfToken;
+                                            }
+                                        }
+
+                                        const response = await fetch('{{ route("system.ssl.install") }}', {
+                                            method: 'POST',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                                            },
+                                            body: JSON.stringify(body)
+                                        });
+
+                                        const data = await response.json();
+
+                                        if (data.success) {
+                                            window.location.href = data.redirect;
+                                        } else {
+                                            throw new Error(data.message);
+                                        }
+                                    } catch (e) {
+                                        this.error = e.message || 'Installation failed.';
+                                    } finally {
+                                        this.loading = false;
+                                    }
+                                }
+                            }
+                        }
+                    </script>
+
+
+
+                    <!-- Section 3: Performance -->
+                    <div class="card-modern">
+                        <div class="card-header-modern">
+                            <div class="card-icon-wrapper">
+                                <svg class="card-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="card-title-modern">System Performance</h3>
+                                <p class="card-subtitle-modern">Fine-tune refresh rates and caching strategies.</p>
+                            </div>
+                        </div>
+                        <div class="card-body-modern">
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <!-- Real-time -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Websocket
+                                        Refresh (Seconds)</label>
+                                    <div class="mt-1">
+                                        <input type="number" name="realtime_interval" min="2" max="300"
+                                            value="{{ $settings['realtime_interval'] ?? 10 }}"
+                                            class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                        <p class="mt-1 text-xs text-gray-500">Update frequency when connected to
+                                            WebSocket.
+                                        </p>
+                                    </div>
+                                </div>
+                                <!-- Fallback -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Polling
+                                        Refresh (Seconds)</label>
+                                    <div class="mt-1">
+                                        <input type="number" name="fallback_interval" min="5" max="600"
+                                            value="{{ $settings['fallback_interval'] ?? 30 }}"
+                                            class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                                        <p class="mt-1 text-xs text-gray-500">Update frequency when WebSockets are
+                                            disconnected.</p>
+                                    </div>
+                                </div>
+
+                                <!-- System Status Check (Locked) -->
+                                <div x-data="{ 
+                                    locked: true, 
+                                    unlock() { 
+                                        this.locked = false; 
+                                        window.dispatchEvent(new CustomEvent('close-modal', { detail: 'status-check-warning' }));
+                                        $nextTick(() => $refs.intervalInput.focus()); 
+                                    } 
+                                }">
+                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">System Health Check Interval</label>
+                                    <div class="mt-1 relative rounded-md shadow-sm w-full">
+                                        <input type="number" name="status_check_interval" x-ref="intervalInput" min="5"
+                                            max="300" value="{{ $settings['status_check_interval'] ?? 5 }}"
+                                            :readonly="locked"
+                                            :class="locked ? 'bg-gray-100 text-gray-500 cursor-not-allowed dark:bg-gray-800' : 'bg-white text-gray-900 dark:bg-gray-700 dark:text-white'"
+                                            class="block w-full rounded-md border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:border-gray-600">
+
+                                        <div x-show="locked" class="absolute inset-y-0 right-0 flex items-center pr-2">
+                                            <button type="button"
+                                                @click="$dispatch('open-modal', 'status-check-warning')"
+                                                class="bg-gray-200 dark:bg-gray-700 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300">Unlock</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Warning Modal -->
+                                    <x-modal name="status-check-warning" maxWidth="sm" focusable>
+                                        <div class="bg-white dark:bg-gray-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                                            <div
+                                                class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20 mb-4">
+                                                <svg class="h-6 w-6 text-red-600 dark:text-red-400" fill="none"
+                                                    viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                </svg>
+                                            </div>
+                                            <div class="text-center">
+                                                <h3
+                                                    class="text-base font-semibold leading-6 text-gray-900 dark:text-white">
+                                                    Caution Recommended</h3>
+                                                <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">Changing
+                                                    this value too low might cause high server load. Are you sure?
+                                                </div>
+                                            </div>
+                                            <div class="mt-5 sm:mt-6 grid grid-cols-2 gap-3">
+                                                <button type="button" x-on:click="$dispatch('close')"
+                                                    class="inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50">Cancel</button>
+                                                <button type="button" @click="unlock()"
+                                                    class="inline-flex w-full justify-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500">Unlock</button>
+                                            </div>
+                                        </div>
+                                    </x-modal>
+                                </div>
+
+                            </div>
+
+                            <!-- Status Cache (MOVED TO BOTTOM) -->
+                            <div
+                                class="pt-6 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                                <div class="flex flex-col">
+                                    <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable Status
+                                        Caching</span>
+                                    <span class="text-xs text-gray-500 dark:text-gray-400">If disabled, status shows
+                                        "Unknown" until fresh check.</span>
+                                </div>
+                                <button type="button"
+                                    x-data="{ on: {{ ($settings['enable_status_cache'] ?? 1) ? 'true' : 'false' }} }"
+                                    @click="on = !on; $refs.cacheInput.value = on ? '1' : '0'"
+                                    :class="on ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'"
+                                    class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2">
+                                    <span aria-hidden="true" :class="on ? 'translate-x-5' : 'translate-x-0'"
+                                        class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                                    <input type="hidden" name="enable_status_cache" x-ref="cacheInput"
+                                        :value="on ? '1' : '0'">
+                                </button>
+                            </div>
+
+                        </div>
+                    </div>
+
+
+
+                </div>
+
+                <!-- Footer / Save (Only visible in Configuration Tab) -->
+                <div class="flex items-center justify-end gap-x-6 pb-12" x-show="activeTab === 'configuration'">
+                    @if (session('success'))
+                        <div x-data="{ show: true }" x-show="show" x-transition
+                            x-init="setTimeout(() => show = false, 3000)"
+                            class="text-sm font-medium text-green-600 dark:text-green-400">
+                            {{ session('success') }}
+                        </div>
+                    @endif
+                    <button type="button" id="saveButton" onclick="verifyAndSubmit()"
+                        class="rounded-md bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 transition-colors">
+                        Save System Settings
+                    </button>
+                    <!-- Loading Spinner (Hidden by default) -->
+                    <div id="verifyingSpinner" class="hidden flex items-center gap-2 text-indigo-600">
+                        <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none"
+                            viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                            </circle>
+                            <path class="opacity-75" fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                            </path>
+                        </svg>
+                        <span class="text-sm font-medium">Verifying reachability...</span>
+                    </div>
+                </div>
+
+                <!-- Force Save Warning Modal -->
+                <div x-data="{ 
+                        errorMessage: '',
+                        hostname: '',
+                        url: '',
+                        open(msg, host, link) { 
+                            this.errorMessage = msg; this.hostname = host; this.url = link; 
+                            window.dispatchEvent(new CustomEvent('open-modal', { detail: 'force-save-modal' }));
+                        },
+                        confirm() { document.getElementById('saveButton').closest('form').submit(); }
+                    }"
+                    @open-force-save-modal.window="open($event.detail.error, $event.detail.hostname, $event.detail.url)">
+
+                    <x-modal name="force-save-modal" focusable maxWidth="lg">
+                        <div class="bg-white dark:bg-gray-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                            <div class="sm:flex sm:items-start">
+                                <div
+                                    class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20 sm:mx-0 sm:h-10 sm:w-10">
+                                    <svg class="h-6 w-6 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24"
+                                        stroke-width="1.5" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                            d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                    </svg>
+                                </div>
+                                <div class="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
+                                    <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">
+                                        Verification Failed</h3>
+                                    <div class="mt-2">
+                                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                                            Could not automatically verify access to <span
+                                                class="font-mono font-medium text-gray-700 dark:text-gray-300"
+                                                x-text="hostname"></span>.
+                                        </p>
+
+                                        <div class="mt-3 mb-3">
+                                            <a :href="url" target="_blank"
+                                                class="inline-flex items-center gap-1 text-sm font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 underline">
+                                                <span>Open site in new tab to verify manually</span>
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                    viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14">
+                                                    </path>
+                                                </svg>
+                                            </a>
+                                        </div>
+
+                                        <p class="text-sm text-red-600 dark:text-red-400 font-mono bg-red-50 dark:bg-red-900/10 p-2 rounded text-xs break-all"
+                                            x-text="errorMessage"></p>
+                                        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                                            If you are sure DNS is configured correctly (e.g., using a local IP
+                                            or internal DNS), you can force save these settings.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-gray-50 dark:bg-gray-700/50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+                            <button type="button" @click="confirm()"
+                                class="inline-flex w-full justify-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:ml-3 sm:w-auto">
+                                Proceed Anyway
+                            </button>
+                            <button type="button" x-on:click="$dispatch('close')"
+                                class="mt-3 inline-flex w-full justify-center rounded-md bg-white dark:bg-gray-800 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-300 shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 sm:mt-0 sm:w-auto">
+                                Cancel
+                            </button>
+                        </div>
+                    </x-modal>
+                </div>
+
+            </form>
+        </div>
+    </div>
+
+    <!-- Uninstall SSL Warning Modal -->
+    <x-modal name="uninstall-ssl-modal" focusable maxWidth="lg">
+        <div class="bg-white dark:bg-gray-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+            <div class="sm:flex sm:items-start">
+                <div
+                    class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20 sm:mx-0 sm:h-10 sm:w-10">
+                    <svg class="h-6 w-6 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24"
+                        stroke-width="1.5" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                </div>
+                <div class="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
+                    <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">Uninstall
+                        SSL Certificate?</h3>
+                    <div class="mt-2">
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                            Are you sure you want to remove the SSL certificate? This will revert your site
+                            to <span
+                                class="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">http://</span>
+                            and traffic will no longer be encrypted.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="bg-gray-50 dark:bg-gray-700/50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+            <form method="POST" action="{{ route('system.ssl.uninstall') }}">
+                @csrf
+                @method('DELETE')
+                <button type="submit"
+                    class="inline-flex w-full justify-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:ml-3 sm:w-auto">
+                    Uninstall
+                </button>
+            </form>
+            <button type="button" x-on:click="$dispatch('close')"
+                class="mt-3 inline-flex w-full justify-center rounded-md bg-white dark:bg-gray-800 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-300 shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 sm:mt-0 sm:w-auto">
+                Cancel
+            </button>
+        </div>
+    </x-modal>
+
+    <!-- Restore Branding Modal -->
+    <div x-data="{ type: '' }"
+        @open-restore-modal.window="type = $event.detail.type; $dispatch('open-modal', 'restore-branding-modal')">
+        <x-modal name="restore-branding-modal" focusable maxWidth="md">
+            <div class="bg-white dark:bg-gray-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                <div class="sm:flex sm:items-start">
+                    <div
+                        class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20 sm:mx-0 sm:h-10 sm:w-10">
+                        <svg class="h-6 w-6 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24"
+                            stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                        </svg>
+                    </div>
+                    <div class="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
+                        <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white"
+                            x-text="'Restore Default ' + type.charAt(0).toUpperCase() + type.slice(1)"></h3>
+                        <div class="mt-2">
+                            <p class="text-sm text-gray-500 dark:text-gray-400">
+                                Are you sure you want to restore the default <span x-text="type"></span>? This
+                                cannot be undone.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-gray-50 dark:bg-gray-700/50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+                <form method="POST" action="{{ route('system.settings.restore') }}">
+                    @csrf
+                    <input type="hidden" name="type" :value="type">
+                    <button type="submit"
+                        class="inline-flex w-full justify-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:ml-3 sm:w-auto">
+                        Restore
+                    </button>
+                </form>
+                <button type="button" x-on:click="$dispatch('close')"
+                    class="mt-3 inline-flex w-full justify-center rounded-md bg-white dark:bg-gray-800 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-300 shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 sm:mt-0 sm:w-auto">
+                    Cancel
+                </button>
+            </div>
+        </x-modal>
+    </div> <!-- Toast Notification -->
+    <div x-data="{ show: false, message: '', type: 'success' }"
+        @notify.window="show = true; message = $event.detail.message; type = $event.detail.type || 'success'; setTimeout(() => show = false, 4000)"
+        x-show="show" x-transition:enter="transform ease-out duration-300 transition"
+        x-transition:enter-start="translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-2"
+        x-transition:enter-end="translate-y-0 opacity-100 sm:translate-x-0"
+        x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100"
+        x-transition:leave-end="opacity-0" x-cloak
+        class="fixed bottom-0 right-0 z-50 m-6 max-w-sm w-full bg-white dark:bg-gray-800 shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden">
+        <div class="p-4">
+            <div class="flex items-start">
+                <div class="flex-shrink-0">
+                    <svg x-show="type === 'success'" class="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24"
+                        stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <svg x-show="type === 'error'" class="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24"
+                        stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </div>
+                <div class="ml-3 w-0 flex-1 pt-0.5">
+                    <p class="text-sm font-medium text-gray-900 dark:text-gray-100" x-text="message"></p>
+                </div>
+                <div class="ml-4 flex-shrink-0 flex">
+                    <button @click="show = false"
+                        class="bg-transparent rounded-md inline-flex text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        <span class="sr-only">Close</span>
+                        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd"
+                                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                                clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function restoreDefault(type) {
+            window.dispatchEvent(new CustomEvent('open-restore-modal', { detail: { type: type } }));
+        }
+
+        function confirmUninstall() {
+            window.dispatchEvent(new CustomEvent('open-modal', { detail: 'uninstall-ssl-modal' }));
+        }
+
+        async function verifyAndSubmit() {
+            const btn = document.getElementById('saveButton');
+            const spinner = document.getElementById('verifyingSpinner');
+            const form = btn.closest('form');
+
+            // Get values
+            // Get values
+            const hostnameInput = form.querySelector('input[name="site_url"]');
+            // const protocolElement = form.querySelector('[name="site_protocol"]');
+
+            const hostname = hostnameInput.value.trim();
+            const protocol = '{{ $settings["site_protocol"] ?? "http" }}';
+
+            if (!hostname) {
+                form.submit();
+                return;
+            }
+
+            // UI State
+            btn.classList.add('hidden');
+            spinner.classList.remove('hidden');
+
+            // Construct Link URL
+            let cleanHost = hostname.replace(/^https?:\/\//, '').replace(/\/$/, '');
+            const checkLink = `${protocol}://${cleanHost}`;
+
+            // Use server-side proxy to check reachability
+            // This avoids Mixed Content (HTTPS -> HTTP) and CORS issues
+            const proxyUrl = '{{ route("system.proxy-check") }}';
+
+            try {
+                const response = await fetch(proxyUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({ url: checkLink })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'ok') {
+                    form.submit();
+                } else {
+                    throw new Error(data.message || 'Validation failed');
+                }
+
+            } catch (error) {
+                console.error('Verification failed:', error);
+
+                // Reset UI buttons first so they don't get stuck if user cancels modal
+                btn.classList.remove('hidden');
+                spinner.classList.add('hidden');
+
+                // Dispatch event to open modal
+                window.dispatchEvent(new CustomEvent('open-force-save-modal', {
+                    detail: {
+                        error: error.message,
+                        hostname: hostname,
+                        url: checkLink
+                    }
+                }));
+            }
+        }
+
+        window.verifyReachabilityOnly = async function () {
+            console.log('Verify Button Clicked');
+            const btn = document.getElementById('verifyDomainBtn');
+
+            // Use the hidden input for protocol now (since dropdown is gone)
+            // But verifyAndSubmit used querySelector('[name="site_protocol"]').
+            // My previous fix in Step 1135 ensured it finds it.
+
+            const hostnameInput = document.querySelector('input[name="site_url"]');
+            // const protocolElement = document.querySelector('[name="site_protocol"]');
+
+            const hostname = hostnameInput.value.trim();
+            const protocol = '{{ $settings["site_protocol"] ?? "http" }}';
+
+            if (!hostname) return;
+
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = '...';
+
+
+            // Construct Link URL
+            let cleanHost = hostname.replace(/^https?:\/\//, '').replace(/\/$/, '');
+            const checkLink = `${protocol}://${cleanHost}`;
+            const targetUrl = `${checkLink}/system/check-hostname`;
+
+            console.log(`Verifying reachability of: ${targetUrl}`);
+
+            // Use server-side proxy
+            const proxyUrl = '{{ route("system.proxy-check") }}';
+
+            try {
+                const response = await fetch(proxyUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    body: JSON.stringify({ url: checkLink })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'ok') {
+                    window.showSuccessToast('Domain is accessible via HTTP', 'Success!');
+                } else {
+                    throw new Error(data.message || 'Verification Failed');
+                }
+            } catch (error) {
+                console.error(error);
+                window.showErrorToast(`Not Accessible: ${error.message || 'Unknown Error'}`, 'Error!');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
+        }
+    </script>
+</x-app-layout>

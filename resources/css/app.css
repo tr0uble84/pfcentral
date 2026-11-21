@@ -1,0 +1,101 @@
+@import './pfsense-responsive.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+    .btn-primary {
+        @apply inline-flex items-center px-4 py-2 bg-indigo-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-indigo-700 focus:bg-indigo-700 active:bg-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition ease-in-out duration-150;
+    }
+
+    .btn-xs {
+        @apply px-2 py-1 text-xs;
+    }
+
+    .btn-sm {
+        @apply px-3 py-1.5 text-xs;
+    }
+
+    .btn-md {
+        @apply px-4 py-2 text-sm;
+    }
+
+    .btn-lg {
+        @apply px-6 py-3 text-base;
+    }
+
+    .btn-xl {
+        @apply px-8 py-4 text-lg;
+    }
+
+    /* Modern Card System */
+    .card-modern {
+        @apply bg-white dark:bg-gray-800 shadow-xl rounded-2xl overflow-hidden mb-8 border border-gray-100 dark:border-gray-700 transition-all hover:shadow-2xl;
+    }
+
+    .card-header-modern {
+        @apply px-6 py-6 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 flex items-center gap-4;
+    }
+
+    .card-icon-wrapper {
+        @apply p-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl;
+    }
+
+    .card-icon {
+        @apply w-6 h-6 text-indigo-600 dark:text-indigo-400;
+    }
+
+    .card-title-modern {
+        @apply text-lg font-bold text-gray-900 dark:text-white;
+    }
+
+    .card-subtitle-modern {
+        @apply text-sm text-gray-500 dark:text-gray-400;
+    }
+
+    .card-body-modern {
+        @apply px-6 py-6 space-y-8;
+    }
+}
+
+@layer base {
+    select option {
+        @apply text-gray-600 dark:text-gray-400;
+    }
+
+    [type='text'],
+    [type='email'],
+    [type='url'],
+    [type='password'],
+    [type='number'],
+    [type='date'],
+    [type='datetime-local'],
+    [type='month'],
+    [type='search'],
+    [type='tel'],
+    [type='time'],
+    [type='week'],
+    [multiple],
+    textarea,
+    select {
+        @apply border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:border-indigo-500 dark:focus:border-indigo-600 focus:ring-indigo-500 dark:focus:ring-indigo-600 rounded-lg shadow-sm transition duration-150 ease-in-out;
+    }
+
+    .form-input-reset {
+        border: none !important;
+        outline: none !important;
+        box-shadow: none !important;
+        background-color: transparent !important;
+    }
+}
+/* Release notes ("What's new") rendered from CHANGELOG.md */
+.release-notes ul { @apply list-disc pl-5 space-y-1.5; }
+.release-notes ul ul { @apply mt-1.5; }
+.release-notes p + p, .release-notes p + ul { @apply mt-2; }
+.release-notes code { @apply px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-[0.85em]; }
+.release-notes strong { @apply font-semibold text-gray-900 dark:text-gray-100; }
+.release-notes a { @apply text-brand-700 dark:text-brand-300 underline underline-offset-2; }
+
+/* Brand selection colour */
+::selection { background: #33C5F3; color: #0E2238; }

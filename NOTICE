@@ -1,0 +1,14 @@
+PFCentral
+Copyright (c) 2026 Jay Behi
+
+The PFCentral additions and changes (including the deployments, upgrade
+centre, VPN access, security, external API and Microsoft 365 sign-in
+features) are Copyright (c) 2026 Jay Behi.
+
+Portions of PFCentral come from earlier open-source work; those portions
+remain the copyright of their original authors. Third-party libraries keep
+their own licenses (see composer.json and package.json).
+
+pfSense is a registered trademark of Rubicon Communications, LLC (Netgate).
+OPNsense is a registered trademark of Deciso B.V. PFCentral is not affiliated
+with or endorsed by Netgate or Deciso.
