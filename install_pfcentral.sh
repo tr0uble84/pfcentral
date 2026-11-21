@@ -21,7 +21,7 @@ UBUNTU_PHP_REQUEST="${PHP_VER:-auto}"
 PHP_VER="${PHP_VER:-8.4}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
 
-REPO_URL="${REPO_URL:-https://github.com/tr0uble84/pfcentral-Jay.git}"
+REPO_URL="${REPO_URL:-https://github.com/tr0uble84/pfcentral.git}"
 INSTALL_DIR="${INSTALL_DIR:-/var/www/pfcentral}"
 WEB_USER="${WEB_USER:-www-data}"
 WEB_GROUP="${WEB_GROUP:-www-data}"
