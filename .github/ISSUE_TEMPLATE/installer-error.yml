@@ -1,0 +1,40 @@
+name: Installer error
+description: The PFCentral installer stopped with an error. The installer fills this in for you.
+title: "Installer error: "
+labels: ["installer-error"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The installer removes passwords, keys, your domain and your server's address
+        before filling this in; check the text below once more before you submit.
+  - type: input
+    id: step
+    attributes:
+      label: Step that failed
+      placeholder: "e.g. 5 of 12: PHP dependencies (Composer)"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      placeholder: "e.g. Ubuntu 24.04, x86_64, 4 GB RAM"
+  - type: input
+    id: version
+    attributes:
+      label: Installer and PFCentral version
+      placeholder: "e.g. installer 2, PFCentral v0.20.0"
+  - type: textarea
+    id: error
+    attributes:
+      label: What the installer showed
+      description: The error and the last lines of the install log.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: What you were doing, anything unusual about this server.
