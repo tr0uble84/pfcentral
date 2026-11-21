@@ -30,7 +30,7 @@ WRAPPERS_SRC="$SCRIPT_DIR/privileged"
 APP_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 WRAPPERS_DEST="/usr/local/bin"
 SUDOERS_FILE="/etc/sudoers.d/pfcentral"
-APP_USER="www-data"
+APP_USER="${APP_USER:-www-data}"
 
 WRAPPER_NAMES=(
     pfcentral-request-cert

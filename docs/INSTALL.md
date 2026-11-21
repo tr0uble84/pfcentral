@@ -18,42 +18,46 @@ Other Linux distributions may work but are not officially tested.
 
 ## Automatic Installation (Recommended)
 
-The included installer automates the entire deployment process, including:
+```bash
+curl -fsSL https://raw.githubusercontent.com/tr0uble84/pfcentral/main/install_pfcentral.sh -o install_pfcentral.sh
+sudo bash install_pfcentral.sh
+```
 
-- Nginx installation and configuration
-- PHP 8.3+ installation and configuration
-- MySQL/MariaDB installation and configuration
-- Redis installation and configuration
-- Supervisor installation and configuration
-- Composer dependency installation
-- Frontend asset compilation
-- Laravel queue worker setup
-- Laravel Reverb setup
-- Scheduled task configuration
-- Permission and ownership configuration
+The installer asks for your domain, whether to get a free Let's Encrypt certificate, and an email for it. It then
+checks the server **before changing anything** (system, memory, disk, internet access, ports 80, 443, 3306, 6379
+and 8080, other web servers, the install folder, and that your domain points to this server), and installs in
+12 steps:
 
-### Install PFCentral
+1. Software: Nginx, PHP, MySQL, Redis, Supervisor, Certbot, Composer, Node.js
+2. Database and its user (a strong password is generated)
+3. Download PFCentral
+4. Settings (`.env`)
+5. PHP libraries (Composer)
+6. App key and database tables
+7. Build the web pages
+8. Permissions and the safe SSL helper scripts
+9. Web server (Nginx) and firewall ports (ufw or firewalld, when active)
+10. Background workers, live updates (Reverb) and the scheduler
+11. HTTPS certificate (Let's Encrypt), when chosen
+12. Final check
+
+Each step is checked before the next one starts, and saved as a checkpoint. If a step fails, the installer stops,
+shows the reason and the last lines of the log (`/var/log/pfcentral-install.log`), can send an error report to
+GitHub, and you continue with:
 
 ```bash
-wget https://raw.githubusercontent.com/tr0uble84/pfcentral/main/install_pfcentral.sh
-chmod +x install_pfcentral.sh
-sudo ./install_pfcentral.sh
+sudo bash ~/.pfcentral-install/install_pfcentral.sh --resume
 ```
 
-During installation, you will be prompted for:
+| Option | What it does |
+| :-- | :-- |
+| `--check` | Only the questions and pre-checks; nothing is installed |
+| `--resume` | Continue an installation that stopped |
+| `--verbose` | Show every command's output while installing |
+| `--unattended` | No questions: set `PFC_DOMAIN`, `PFC_EMAIL`, `PFC_HTTPS=yes\|no`, `PFC_REPORT=yes\|no` (and optionally `INSTALL_DIR`, `DB_USER`, `DB_PASS`) |
 
-- Database username
-- Database password
-- Application URL
-- Additional application settings
-
-After installation completes, browse to:
-
-```text
-http://your-server-ip
-```
-
-to access PFCentral.
+When it finishes, browse to `https://your-domain/setup` (or `http://your-server-ip/setup`) to create your
+administrator account.
 
 ---
 

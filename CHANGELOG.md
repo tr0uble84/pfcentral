@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — v0.20.0
+- **Guided installer** (`install_pfcentral.sh`): asks for your domain, HTTPS and an email, then checks the server
+  before changing anything (system, memory, disk, internet access, ports 80, 443, 3306, 6379 and 8080, other web
+  servers, the install folder, and that the domain points to the server). Anything wrong stops it before it
+  starts.
+- **12 checked steps with checkpoints:** each step is checked before the next one starts. If one fails, the
+  installer stops, shows why with the last lines of the log, and `--resume` continues where it stopped.
+- **Error reports:** with your permission, a failed step is reported to the PFCentral repository as an
+  `installer-error` issue, with passwords, keys, the domain, email and IP addresses removed. When the server can't
+  send it, the installer prints a link that opens the report, already filled in, on GitHub.
+- **Free HTTPS** from Let's Encrypt during the install, and a final health check of every part.
+- `--check` (only check a server), `--verbose`, and `--unattended` with `PFC_*` settings.
+- Wiki with flowcharts (github.com/tr0uble84/pfcentral/wiki, sources in `docs/wiki/`) and a public project roadmap.
+
+### Security — v0.20.0
+- New installations no longer let the web server's user run `certbot` or `nginx` as root, or copy files into the
+  Supervisor and PHP configuration folders. It may only run PFCentral's five checked SSL helper scripts and restart
+  its own services. The performance tuning page can't apply settings on new installations yet.
+- A strong database password is generated during the install, and the install log and `.env` are readable by root
+  and the web server only.
+
+### Fixed — v0.20.0
+- The installer works on servers with IPv6 switched off (Nginx no longer fails to start), passes the server's proxy
+  settings on to Composer and npm, and retries the web-page build tools once before stopping with a clear message.
+- The installer's welcome banner shows the PFCentral name.
+
 ### Changed — v0.19.0
 - The code now uses the PFCentral name everywhere: install and upgrade scripts (`install_pfcentral.sh`,
   `upgrade_pfcentral.sh`), helper scripts (`/usr/local/bin/pfcentral-*`), background services (`pfcentral-worker`,

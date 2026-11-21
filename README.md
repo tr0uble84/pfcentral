@@ -16,6 +16,8 @@
   <a href="#what-pfcentral-does">Features</a> ·
   <a href="#versions">Versions</a> ·
   <a href="#install">Install</a> ·
+  <a href="https://github.com/tr0uble84/pfcentral/wiki">Wiki</a> ·
+  <a href="https://github.com/users/tr0uble84/projects/1">Roadmap</a> ·
   <a href="docs/INSTALL.md">Full install guide</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="CONTRIBUTING.md">Contributing</a>
@@ -110,6 +112,7 @@ PFCentral's own "What's new" window.
 
 | Version | What it added |
 | :-- | :-- |
+| **0.20** | Guided installer: asks a few questions, checks the server first, installs in 12 checked steps, resumes where it stopped, and reports errors. Project roadmap and wiki. |
 | **0.19** | The PFCentral name everywhere in the code, scripts and services. Existing installations keep working unchanged. |
 | **0.18** | Deployments cover rules, floating rules, schedules, NAT, DNS overrides, routes, tunables, pfBlockerNG and system settings. Remove items, copy from a firewall, and choose who can deploy. |
 | **0.17** | Deployments: one change to many pfSense firewalls, pre-checked, in waves, with automatic and manual undo. |
@@ -127,16 +130,27 @@ PFCentral's own "What's new" window.
 
 ## Install
 
-On a fresh Ubuntu 24.04 server (Fedora 42+ also tested, Arch experimental):
+On a fresh Linux server (Ubuntu 24.04 LTS recommended), run:
 
 ```bash
-wget https://raw.githubusercontent.com/tr0uble84/pfcentral/main/install_pfcentral.sh
-chmod +x install_pfcentral.sh
-sudo ./install_pfcentral.sh
+curl -fsSL https://raw.githubusercontent.com/tr0uble84/pfcentral/main/install_pfcentral.sh -o install_pfcentral.sh
+sudo bash install_pfcentral.sh
 ```
 
-The installer sets up Nginx, PHP, the database, Redis, background workers and the scheduler, then asks for the
-database details and the address PFCentral will use. Browse to that address when it finishes.
+The installer is a guided wizard:
+
+1. **Asks** for your domain, whether you want a free HTTPS certificate, and an email for it.
+2. **Checks the server before changing anything:** system, memory, disk, internet access, the ports PFCentral
+   needs, other web servers, and that your domain points to this server. Anything wrong stops it right there.
+3. **Installs in 12 steps** (software, database, PFCentral, web server, background workers, HTTPS) and checks each
+   step before going on.
+4. If a step fails, it shows why, can **send an error report** to this repository (passwords, keys, your domain,
+   email and IP addresses removed first), and you **continue where it stopped** with
+   `sudo bash ~/.pfcentral-install/install_pfcentral.sh --resume`.
+
+When it finishes, open `https://your-domain/setup` to create your administrator account. Run it with `--check` to
+only check a server, or `--help` for every option. Step-by-step details with flowcharts are in the
+[wiki](https://github.com/tr0uble84/pfcentral/wiki/Installation).
 
 **Each pfSense firewall needs the [pfRest](https://github.com/pfrest/pfSense-pkg-RESTAPI) package and HTTPS.**
 The [full install guide](docs/INSTALL.md) covers manual installation, updating, adding pfSense and OPNsense
