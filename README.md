@@ -157,3 +157,18 @@ see [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues privately as desc
 PFCentral is an independent project. It is not affiliated with, sponsored by or endorsed by Netgate, Electric Sheep
 Fencing LLC or Deciso B.V. pfSense is a registered trademark of Electric Sheep Fencing LLC. OPNsense is a registered
 trademark of Deciso B.V.
+
+---
+
+```text
+/*
+ *      .-------------------.
+ *      | o--[tr0uble84]--o |
+ *      |      Jay Behi     |
+ *       \        |        /
+ *        '-------V-------'
+ *
+ *  > I keep the packets flowing, the bad traffic out,
+ *    and the 2 a.m. alerts on mute.
+ */
+```
