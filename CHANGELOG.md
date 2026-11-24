@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — v0.21.0
+- **System → Server health** (global admins): the PFCentral server itself at a glance, with what to do when
+  something is wrong. It shows disk space, memory and load, database size and its largest tables, MySQL's change
+  history (binary log), whether Redis answers and accepts writes, where the cache is kept, the job queue and failed
+  jobs, when scheduled tasks and the queue worker last ran, the maintenance timer, and PFCentral's log size.
+- **Warning banner** for global admins on every page when the disk is 85% full or more, Redis stops accepting
+  writes, or scheduled tasks stop running. The Server health link in the sidebar shows a red dot at the same time.
+- **Server maintenance timer** (`scripts/install-maintenance.sh`), every 6 hours as root: keeps one day of MySQL
+  change history (only when no other server copies the database), caps the system journal at 300 MB, removes
+  PFCentral logs older than 14 days, trims `laravel.log` above 200 MB, clears the package cache, removes more
+  history when the disk is still 95% full, and restarts Redis when it stops answering. Optional disk warnings in
+  Microsoft Teams. New installs and `upgrade_pfcentral.sh` set it up; **Run maintenance now** on the Server health
+  page starts it.
+- **Nightly cleanup** (`php artisan pfcentral:cleanup`): removes expired cache rows and sessions, failed jobs older
+  than 30 days, finished job batches and old dated logs. **Clean up PFCentral data** on the Server health page runs
+  it now.
+
+### Changed — v0.21.0
+- **The cache moves from MySQL to Redis** on servers installed before v0.20, during the update, when Redis works.
+  Firewall status is cached every few seconds, and in MySQL every change also went into the change history: on one
+  server that was about 2 GB a day and filled a 24 GB disk. Nothing changes when Redis isn't working.
+
+### Fixed — v0.21.0
+- A full disk no longer goes unnoticed until PFCentral stops loading. When the disk filled, Redis stopped accepting
+  writes and every page hung for about a minute, then showed a server error.
+
 ### Added — v0.20.0
 - **Guided installer** (`install_pfcentral.sh`): asks for your domain, HTTPS and an email, then checks the server
   before changing anything (system, memory, disk, internet access, ports 80, 443, 3306, 6379 and 8080, other web

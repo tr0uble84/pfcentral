@@ -227,6 +227,19 @@
 
             <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 dark:bg-gray-900 pb-20">
 
+                @if(!empty($serverHealthProblems))
+                    <div class="max-w-full mx-auto px-4 sm:px-6 lg:px-8 mt-4" role="alert">
+                        <div class="rounded-md bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 p-3 text-sm text-red-800 dark:text-red-200 flex flex-wrap items-start justify-between gap-3">
+                            <div class="space-y-1">
+                                @foreach($serverHealthProblems as $problem)
+                                    <p>{{ $problem }}</p>
+                                @endforeach
+                            </div>
+                            <a href="{{ route('system.health') }}" class="shrink-0 font-semibold underline underline-offset-2">Open Server health</a>
+                        </div>
+                    </div>
+                @endif
+
                 <!-- Page Content -->
                 @isset($firewall)
                     <div class="max-w-full mx-auto px-4 sm:px-6 lg:px-8 mt-4">

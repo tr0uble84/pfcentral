@@ -12,6 +12,7 @@
 - 🔐 [VPN Access](VPN-Access)
 - 🛡️ [Security](Security)
 - 🔌 [REST API](REST-API)
+- 🩺 [Server health](Server-Health)
 
 **Help**
 - 🧰 [Troubleshooting](Troubleshooting)

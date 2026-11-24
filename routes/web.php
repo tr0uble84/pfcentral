@@ -33,6 +33,12 @@ Route::middleware(['auth', 'verified', App\Http\Middleware\CheckRole::class . ':
     Route::post('/system/security/locks/{firewall}/lock', [App\Http\Controllers\SecurityController::class, 'lock'])->middleware('throttle:20,1')->name('system.security.lock');
     Route::post('/system/security/locks/{firewall}/unlock', [App\Http\Controllers\SecurityController::class, 'unlock'])->middleware('throttle:20,1')->name('system.security.unlock');
     Route::post('/system/security/sessions/{session}/end', [App\Http\Controllers\SecurityController::class, 'endSession'])->whereNumber('session')->name('system.security.session.end');
+
+    // System → Server health: disk, database, Redis, background tasks and the maintenance timer of the PFCentral server.
+    Route::get('/system/health', [App\Http\Controllers\SystemHealthController::class, 'show'])->name('system.health');
+    Route::get('/system/health/data', [App\Http\Controllers\SystemHealthController::class, 'data'])->middleware('throttle:30,1')->name('system.health.data');
+    Route::post('/system/health/maintenance', [App\Http\Controllers\SystemHealthController::class, 'runMaintenance'])->middleware('throttle:3,1')->name('system.health.maintenance');
+    Route::post('/system/health/cleanup', [App\Http\Controllers\SystemHealthController::class, 'runCleanup'])->middleware('throttle:3,1')->name('system.health.cleanup');
 });
 
 // "Open web interface": the firewall's own web interface through PFCentral (when turned on in System → Security).

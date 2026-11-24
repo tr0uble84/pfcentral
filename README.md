@@ -105,6 +105,11 @@ Developed by **Jay Behi**. See [NOTICE](NOTICE).
 - Updates itself from GitHub releases, from the web page. After each update, a "What's new" window lists what
   changed.
 
+### Server health
+- A Server health page for the PFCentral server itself: disk, memory, database, MySQL change history, Redis, the job
+  queue, scheduled tasks and the maintenance timer, each with what to do when something is wrong.
+- A warning banner before the disk fills up, a maintenance timer that keeps it from filling, and a nightly cleanup.
+
 ## Versions
 
 Each release adds a line here; the full notes for every version are in the [changelog](CHANGELOG.md) and in
@@ -112,6 +117,7 @@ PFCentral's own "What's new" window.
 
 | Version | What it added |
 | :-- | :-- |
+| **0.21** | Server health page and warning banner, a maintenance timer that keeps the disk from filling up, nightly cleanup, and the cache moves to Redis. |
 | **0.20** | Guided installer: asks a few questions, checks the server first, installs in 12 checked steps, resumes where it stopped, and reports errors. Project roadmap and wiki. |
 | **0.19** | The PFCentral name everywhere in the code, scripts and services. Existing installations keep working unchanged. |
 | **0.18** | Deployments cover rules, floating rules, schedules, NAT, DNS overrides, routes, tunables, pfBlockerNG and system settings. Remove items, copy from a firewall, and choose who can deploy. |

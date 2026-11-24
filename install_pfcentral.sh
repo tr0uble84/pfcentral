@@ -24,7 +24,7 @@
 # =============================================================================
 set -Eeuo pipefail
 
-INSTALLER_VERSION="2"
+INSTALLER_VERSION="3"
 REPO_SLUG="${REPO_SLUG:-tr0uble84/pfcentral}"
 # Where error reports go. Reports are created as GitHub issues on REPO_SLUG
 # (with the GitHub CLI when it's signed in), or sent to PFC_REPORT_URL when one
@@ -1632,6 +1632,9 @@ EOF
   supervisorctl start 'pfcentral-worker:*' || true
   supervisorctl start pfcentral-reverb || true
   provision_cron
+  # Server maintenance every 6 hours: MySQL change history, journal, logs (scripts/install-maintenance.sh).
+  WEB_USER="${RUNTIME_WEB_USER}" APP_DIR="${INSTALL_DIR}" bash "${INSTALL_DIR}/scripts/install-maintenance.sh" \
+    || die "The server maintenance timer couldn't be installed (see the log). Fix it, then resume."
   sleep 5
 }
 verify_services() {
@@ -1641,6 +1644,7 @@ verify_services() {
   echo "$st" | grep -E '^pfcentral-reverb' | grep -q RUNNING || check_fail "the live-updates service isn't running (see ${INSTALL_DIR}/storage/logs/reverb.log)"
   echo "$st" | grep -E '^pfcentral' | grep -qE 'FATAL|BACKOFF|EXITED' && check_fail "a background service keeps stopping (run: sudo supervisorctl status)"
   [[ -f /etc/cron.d/pfcentral ]] || check_fail "the scheduler (cron) wasn't set up"
+  systemctl is-enabled --quiet pfcentral-maintenance.timer || check_fail "the server maintenance timer isn't enabled (run: sudo bash ${INSTALL_DIR}/scripts/install-maintenance.sh)"
   return 0
 }
 
@@ -1679,6 +1683,7 @@ verify_health() {
   health_line "Background workers are running"        "supervisorctl status | grep -E '^pfcentral-worker' | grep -q RUNNING"
   health_line "Live updates (Reverb) are running"     "supervisorctl status pfcentral-reverb | grep -q RUNNING"
   health_line "Scheduler is set up"                   "test -f /etc/cron.d/pfcentral"
+  health_line "Server maintenance timer is on"       "systemctl is-active --quiet pfcentral-maintenance.timer"
   health_line "Database tables are up to date"        "! run_as_runtime_user \"cd '$INSTALL_DIR' && php artisan migrate:status --no-ansi\" | grep -q Pending"
   health_line "Web pages are built"                   "test -f '$INSTALL_DIR/public/build/manifest.json'"
   health_line "Home page answers (HTTP)"              "[[ \$(local_http_code) =~ ^(200|302)\$ ]]"

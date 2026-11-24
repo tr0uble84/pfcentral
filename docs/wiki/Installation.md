@@ -97,7 +97,7 @@ Nothing on the server changes while these run. Any ✖ stops the installer befor
 | 7 | Build the web pages | the page build exists |
 | 8 | Permissions and safe admin helpers | the web user can write where it must, and nowhere it shouldn't |
 | 9 | Web server (Nginx) and firewall ports | the home page answers |
-| 10 | Background workers, live updates, scheduler | every worker is running |
+| 10 | Background workers, live updates, scheduler, maintenance timer | every worker is running and the maintenance timer is on |
 | 11 | HTTPS certificate | the site answers over HTTPS |
 | 12 | Final check | everything above, once more |
 

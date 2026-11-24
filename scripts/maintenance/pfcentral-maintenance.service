@@ -1,0 +1,8 @@
+[Unit]
+Description=PFCentral server maintenance (disk cleanup)
+After=mysql.service redis-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pfcentral-maintenance.sh
+Nice=10

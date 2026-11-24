@@ -241,6 +241,18 @@
                         </svg>
                         <span :class="collapsed ? 'md:hidden' : 'block'" class="transition-opacity duration-300">{{ __('Security') }}</span>
                     </a>
+                    <a href="{{ route('system.health') }}"
+                        class="group flex items-center px-2 py-2 text-base font-medium rounded-md sidebar-nav-item {{ request()->routeIs('system.health*') ? 'active' : '' }}">
+                        <div class="relative mr-3">
+                            <svg class="h-6 w-6 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12h4l2-6 4 12 2-6h6" />
+                            </svg>
+                            @if(!empty($serverHealthProblems))
+                                <span class="absolute top-0 right-0 block h-2.5 w-2.5 rounded-full ring-2 ring-white bg-red-500 transform translate-x-1/2 -translate-y-1/2"></span>
+                            @endif
+                        </div>
+                        <span :class="collapsed ? 'md:hidden' : 'block'" class="transition-opacity duration-300">{{ __('Server health') }}</span>
+                    </a>
                 @endif
 
             @endif

@@ -65,6 +65,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Server maintenance timer (every 6 hours: MySQL change history, journal, logs).
+# Idempotent: safe to run on every upgrade; keeps /etc/pfcentral-maintenance.conf.
+# ---------------------------------------------------------------------------
+MAINT_SCRIPT="${APP_DIR}/scripts/install-maintenance.sh"
+if [ -f "$MAINT_SCRIPT" ]; then
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        echo "==> Installing the server maintenance timer..."
+        APP_DIR="$APP_DIR" bash "$MAINT_SCRIPT" || echo "WARNING: the maintenance timer could not be installed." >&2
+    else
+        echo "INFO: Not running as root — skipping the maintenance timer." >&2
+        echo "      Run manually: sudo bash ${MAINT_SCRIPT}" >&2
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Delegate to the host-readiness wizard for the remaining preparation steps.
 # ---------------------------------------------------------------------------
 command -v python3 >/dev/null || {

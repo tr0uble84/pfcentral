@@ -34,6 +34,20 @@ flowchart LR
 
 The full log is in **`/var/log/pfcentral-install.log`**.
 
+## PFCentral is slow, or pages show "500 Server Error"
+
+The most common cause is a **full disk**. When the disk fills up, Redis stops accepting writes and every page waits
+for it until it times out. Open **System → Server health** if you can, or check on the server:
+
+```bash
+df -h /
+redis-cli ping            # MISCONF means Redis can't save to the full disk
+```
+
+Free space with `sudo /usr/local/sbin/pfcentral-maintenance.sh`, then `sudo systemctl restart redis-server php8.5-fpm`.
+If the maintenance script isn't there yet, install it: `sudo bash /var/www/pfcentral/scripts/install-maintenance.sh`.
+See [Server health](Server-Health).
+
 ## Error reports
 
 When you allow it, a failed step sends a report to the developers as a GitHub issue labelled

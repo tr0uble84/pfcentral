@@ -64,3 +64,19 @@ Schedule::call(fn () => \App\Services\Deploy\DeployRunner::runDue())
     ->name('deployments-due')
     ->withoutOverlapping(5)
     ->onOneServer();
+
+// Server health: the scheduler and the queue worker check in, so System → Server health
+// can tell when either has stopped.
+Schedule::call(fn () => \App\Services\Health\ServerHealth::beatScheduler())
+    ->everyMinute()
+    ->name('health-scheduler-beat');
+
+Schedule::job(new \App\Jobs\QueueHeartbeatJob())
+    ->everyFiveMinutes()
+    ->name('health-queue-beat');
+
+// Server health: prune old failed jobs, expired cache rows and sessions, and old dated logs.
+Schedule::command('pfcentral:cleanup')
+    ->dailyAt('03:45')
+    ->withoutOverlapping(60)
+    ->onOneServer();

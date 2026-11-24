@@ -68,5 +68,13 @@ class AppServiceProvider extends ServiceProvider
         \Illuminate\Support\Facades\Gate::policy(\App\Models\Firewall::class, \App\Policies\FirewallPolicy::class);
 
         Event::listen(Login::class, RecordLastLogin::class);
+
+        // Server health banner and sidebar dot, for global admins only (checked at most once a minute).
+        \Illuminate\Support\Facades\View::composer(['layouts.app', 'layouts.sidebar'], function ($view) {
+            $user = auth()->user();
+            $view->with('serverHealthProblems', $user && $user->isGlobalAdmin()
+                ? \App\Services\Health\ServerHealth::bannerProblems()
+                : []);
+        });
     }
 }
