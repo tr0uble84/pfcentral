@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — v0.21.1
+- **CFBTEL VPN for Mac** on the staff VPN page: **Download for Mac** (`/vpn/download/macos`) sends people to the
+  newest installer (`CFBTEL-VPN-x.pkg`, Apple silicon and Intel, macOS 11 or later) from the
+  `cfbtel/cfbtel-vpn-macos` releases. The Mac app signs in exactly like the Windows app (`/vpn/app`).
+- **Get the CFBTEL VPN app** on the staff page: Download for Windows or Download for Mac (the one matching the
+  visitor's computer is highlighted), then open the app and click Sign in.
+
+### Changed — v0.21.1
+- The Mac steps (Help and new device pages) now use CFBTEL VPN for Mac with Sign in; the WireGuard app with a setup
+  file stays available as an option.
+- Wording: "the CFBTEL VPN app" instead of "the Windows app" in VPN settings and on the company page. A device added
+  by the app without a name is called "Computer".
+
 ### Added — v0.21.0
 - **System → Server health** (global admins): the PFCentral server itself at a glance, with what to do when
   something is wrong. It shows disk space, memory and load, database size and its largest tables, MySQL's change

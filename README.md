@@ -117,7 +117,7 @@ PFCentral's own "What's new" window.
 
 | Version | What it added |
 | :-- | :-- |
-| **0.21** | Server health page and warning banner, a maintenance timer that keeps the disk from filling up, nightly cleanup, and the cache moves to Redis. |
+| **0.21** | Server health page and warning banner, a maintenance timer that keeps the disk from filling up, nightly cleanup, and the cache moves to Redis. 0.21.1: CFBTEL VPN for Mac on the staff VPN page (Windows or Mac download). |
 | **0.20** | Guided installer: asks a few questions, checks the server first, installs in 12 checked steps, resumes where it stopped, and reports errors. Project roadmap and wiki. |
 | **0.19** | The PFCentral name everywhere in the code, scripts and services. Existing installations keep working unchanged. |
 | **0.18** | Deployments cover rules, floating rules, schedules, NAT, DNS overrides, routes, tunables, pfBlockerNG and system settings. Remove items, copy from a firewall, and choose who can deploy. |

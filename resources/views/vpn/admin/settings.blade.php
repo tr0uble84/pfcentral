@@ -93,7 +93,7 @@
                         <label class="{{ $label }} md:col-span-2">From address<input name="mail_from_address" value="{{ old('mail_from_address', $mail['mail_from_address']) }}" placeholder="vpn@cfbtel.com" class="{{ $input }}"></label>
                         <label class="{{ $label }}">From name<input name="mail_from_name" value="{{ old('mail_from_name', $mail['mail_from_name']) }}" placeholder="CFBTEL VPN" class="{{ $input }}"></label>
                     </div>
-                    <label class="{{ $label }}">Support tickets from the Windows app go to<input name="support_email" value="{{ old('support_email', $mail['support_email']) }}" placeholder="help@cfbtel.com" class="{{ $input }}"></label>
+                    <label class="{{ $label }}">Support tickets from the CFBTEL VPN app go to<input name="support_email" value="{{ old('support_email', $mail['support_email']) }}" placeholder="help@cfbtel.com" class="{{ $input }}"></label>
                     <label class="{{ $label }}">Invitation subject<input name="invite_subject" value="{{ old('invite_subject', $mail['invite_subject']) }}" class="{{ $input }}"></label>
                     <label class="{{ $label }}">Invitation text<textarea name="invite_body" rows="10" class="{{ $input }} font-mono">{{ old('invite_body', $mail['invite_body']) }}</textarea></label>
                     <p class="text-xs text-gray-500">Placeholders: <code>{name}</code> <code>{email}</code> <code>{company}</code> <code>{link}</code> (required) <code>{expires}</code> <code>{portal}</code>.</p>

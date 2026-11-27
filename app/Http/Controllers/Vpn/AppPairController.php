@@ -14,7 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * "Sign in" in the CFBTEL VPN Windows app:
+ * "Sign in" in the CFBTEL VPN app (Windows and Mac):
  *
  *  1. The app makes its own key pair, listens on 127.0.0.1:<port> and opens
  *     /vpn/app?state=…&port=…&pub=<its public key>&name=<computer name> in the browser.
@@ -39,7 +39,7 @@ class AppPairController extends Controller
         $state = (string) $request->input('state', '');
         $port = (int) $request->input('port', 0);
         $pub = (string) $request->input('pub', '');
-        $name = WireGuard::cleanDeviceName(substr((string) $request->input('name', ''), 0, 32)) ?? 'Windows PC';
+        $name = WireGuard::cleanDeviceName(substr((string) $request->input('name', ''), 0, 32)) ?? 'Computer';
         if (!preg_match('/^[A-Za-z0-9_-]{16,64}$/', $state) || $port < 1024 || $port > 65535 || !WireGuard::isKey($pub)) {
             return null;
         }
@@ -110,7 +110,7 @@ class AppPairController extends Controller
         return redirect()->away("http://127.0.0.1:{$p['port']}/callback?" . http_build_query(['code' => $code, 'state' => $p['state']]));
     }
 
-    /** Windows tunnel names: letters, numbers, = + . _ - ; at most 32 characters. */
+    /** Tunnel names (Windows and Mac apps): letters, numbers, = + . _ - ; at most 32 characters. */
     public static function tunnelName(string $office): string
     {
         $n = trim(preg_replace('/[^A-Za-z0-9=+._-]+/', '-', 'CFBTEL-' . $office), '-');

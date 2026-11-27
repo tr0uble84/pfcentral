@@ -1504,6 +1504,28 @@ class VpnModuleTest extends TestCase
         $this->get('/vpn/download/windows')->assertRedirect('https://github.com/cfbtel/cfbtel-vpn-windows/releases');
     }
 
+    public function test_mac_download_goes_to_the_newest_cfbtel_vpn_installer(): void
+    {
+        Http::fake(['api.github.com/repos/cfbtel/cfbtel-vpn-macos/releases*' => Http::response([
+            ['tag_name' => 'v1.0.1', 'draft' => true, 'assets' => [['name' => 'CFBTEL-VPN-1.0.1.pkg', 'browser_download_url' => 'https://github.com/cfbtel/cfbtel-vpn-macos/releases/download/v1.0.1/CFBTEL-VPN-1.0.1.pkg']]],
+            ['tag_name' => 'v1.0.0', 'draft' => false, 'assets' => [
+                ['name' => 'CFBTEL-VPN-1.0.0.pkg.sha256', 'browser_download_url' => 'https://github.com/cfbtel/cfbtel-vpn-macos/releases/download/v1.0.0/CFBTEL-VPN-1.0.0.pkg.sha256'],
+                ['name' => 'CFBTEL-VPN-1.0.0.pkg', 'browser_download_url' => 'https://github.com/cfbtel/cfbtel-vpn-macos/releases/download/v1.0.0/CFBTEL-VPN-1.0.0.pkg'],
+            ]],
+        ])]);
+
+        \App\Models\User::factory()->create(); // past first-run setup
+        $this->get('/vpn/download/macos')->assertRedirect('https://github.com/cfbtel/cfbtel-vpn-macos/releases/download/v1.0.0/CFBTEL-VPN-1.0.0.pkg');
+        $this->get('/vpn/help')->assertSee('CFBTEL VPN for Mac')->assertSee('Sign in to CFBTEL');
+    }
+
+    public function test_mac_download_falls_back_to_the_releases_page(): void
+    {
+        Http::fake(['api.github.com/*' => Http::response([], 500)]);
+        \App\Models\User::factory()->create();
+        $this->get('/vpn/download/macos')->assertRedirect('https://github.com/cfbtel/cfbtel-vpn-macos/releases');
+    }
+
     // ---- live VPN page ----
 
     public function test_live_page_shows_who_is_connected_without_sending_keys(): void

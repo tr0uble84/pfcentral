@@ -953,6 +953,7 @@ Route::prefix('vpn')->name('vpn.portal.')->group(function () {
     Route::get('/', [App\Http\Controllers\Vpn\PortalController::class, 'index'])->name('index');
     Route::get('/help', [App\Http\Controllers\Vpn\PortalController::class, 'help'])->name('help');
     Route::get('/download/windows', [App\Http\Controllers\Vpn\WindowsAppController::class, 'download'])->middleware('throttle:vpn-portal')->name('download.windows');
+    Route::get('/download/macos', [App\Http\Controllers\Vpn\MacAppController::class, 'download'])->middleware('throttle:vpn-portal')->name('download.macos');
     Route::match(['get', 'post'], '/login', [App\Http\Controllers\Vpn\PortalController::class, 'login'])->middleware('throttle:vpn-portal')->name('login');
     Route::post('/login/password', [App\Http\Controllers\Vpn\PortalController::class, 'passwordLogin'])->middleware('throttle:vpn-portal')->name('login.password');
     Route::get('/mfa', [App\Http\Controllers\Vpn\PortalController::class, 'mfaForm'])->middleware('throttle:vpn-portal')->name('mfa');

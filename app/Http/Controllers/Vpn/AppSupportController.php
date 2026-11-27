@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 
 /**
- * Called by the CFBTEL VPN Windows app's Diagnostics tab. The app proves which device it is with the device's
+ * Called by the CFBTEL VPN app's Diagnostics tab (Windows and Mac). The app proves which device it is with the device's
  * WireGuard public key (from its own tunnel settings); nothing is shown about other devices.
  */
 class AppSupportController extends Controller

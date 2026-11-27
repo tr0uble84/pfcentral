@@ -23,7 +23,7 @@
             <div class="{{ $card }}">
                 <p class="text-sm text-gray-600 dark:text-gray-300">
                     People this company gives VPN access sign in at <a class="text-indigo-600 dark:text-indigo-400 underline" href="{{ $portalUrl }}" target="_blank" rel="noopener">{{ $portalUrl }}</a>
-                    with their own Microsoft 365 account (or email and password) and add up to {{ \App\Services\Vpn\VpnSettings::maxDevices() }} devices (CFBTEL VPN for Windows, WireGuard or AmneziaVPN app).
+                    with their own Microsoft 365 account (or email and password) and add up to {{ \App\Services\Vpn\VpnSettings::maxDevices() }} devices (CFBTEL VPN for Windows or Mac, WireGuard or AmneziaVPN app).
                 </p>
             </div>
 
@@ -337,7 +337,7 @@
                 </div>
             </div>
 
-            {{-- Support tickets from the Windows app --}}
+            {{-- Support tickets from the CFBTEL VPN app (Windows and Mac) --}}
             <div class="{{ $card }}">
                 <h3 class="text-lg font-bold mb-3">Support tickets from the app</h3>
                 <p class="text-xs text-gray-500 mb-2">Sent from CFBTEL VPN → Diagnostics, with the checks and the VPN log. Each one is also emailed to {{ \App\Http\Controllers\Vpn\AppSupportController::supportAddress() }}.</p>

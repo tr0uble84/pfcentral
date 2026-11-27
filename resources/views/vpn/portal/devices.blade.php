@@ -20,6 +20,14 @@
                 <li class="small">No devices yet.</li>
             @endforelse
         </ul>
+        @php($onMac = str_contains((string) request()->userAgent(), 'Macintosh'))
+        <h2>Get the CFBTEL VPN app</h2>
+        <p class="small">Install the app, open it and click <strong>Sign in</strong>. It adds this computer by itself, no setup file needed.</p>
+        <p class="actions">
+            <a class="btn{{ $onMac ? ' secondary' : '' }}" href="{{ route('vpn.portal.download.windows') }}">Download for Windows</a>
+            <a class="btn{{ $onMac ? '' : ' secondary' }}" href="{{ route('vpn.portal.download.macos') }}">Download for Mac</a>
+        </p>
+        <p class="small">Windows on ARM? <a href="{{ route('vpn.portal.download.windows', ['arch' => 'arm64']) }}">Get this one</a>. The Mac app works on Apple silicon and Intel Macs (macOS 11 or later). Phones and tablets: add a device below and use the WireGuard app.</p>
         <h2>Add a device</h2>
         @if($devices->count() >= $max)
             <p class="small">You have the maximum of {{ $max }} devices. Remove one first.</p>

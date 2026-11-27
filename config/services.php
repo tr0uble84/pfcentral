@@ -60,4 +60,8 @@ return [
         'repo' => env('VPN_WINDOWS_REPO', 'cfbtel/cfbtel-vpn-windows'),
     ],
 
+    'vpn_macos' => [
+        'repo' => env('VPN_MACOS_REPO', 'cfbtel/cfbtel-vpn-macos'),
+    ],
+
 ];

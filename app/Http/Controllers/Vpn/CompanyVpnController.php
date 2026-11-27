@@ -669,7 +669,7 @@ class CompanyVpnController extends Controller
         return back()->with('success', 'Saved. New devices use these settings.');
     }
 
-    /** A support ticket from the Windows app: the message and the full diagnostic report (as text, or ?download=1). */
+    /** A support ticket from the CFBTEL VPN app: the message and the full diagnostic report (as text, or ?download=1). */
     public function supportReport(Request $request, Company $company, int $report)
     {
         $r = \App\Models\Vpn\VpnSupportReport::where('company_id', $company->id)->findOrFail($report);
